@@ -1,0 +1,20 @@
+# 빌드 산출물
+build/
+deploy/
+dist/
+
+# 기기 시리얼 등 개인 데이터가 들어 있는 캡처
+captures/
+
+# VD 바이너리 분석 결과물 (Ghidra 프로젝트, 디컴파일 출력)
+re_work/
+
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+docs/
+
+# 개인 분석/캡처 도구 (공개하지 않음)
+tools/*
+!tools/package.ps1

@@ -1,0 +1,7 @@
+{
+	"alwaysActivate": true,
+	"name" : "wygxrcontrollerfix",
+	"directory" : "",
+	"resourceOnly" : false,
+	"activateOtherDriversWhenEnabled" : true
+}

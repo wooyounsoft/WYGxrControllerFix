@@ -1,0 +1,5 @@
+{
+	"driver_wygxrcontrollerfix": {
+		"loadPriority": 10000
+	}
+}
