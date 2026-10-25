@@ -2,15 +2,14 @@
 =====================================================================
 
 [무엇을 하나요]
-Galaxy XR을 Virtual Desktop(VD)으로 SteamVR에 연결하면 물건을 던질 때
-옆으로 날아가거나 힘없이 떨어지는 문제가 있습니다.
-이 애드온은 그 문제를 고쳐서 던진 방향과 세기가 손동작대로 나가게 합니다.
+Galaxy XR 컨트롤러를 Virtual Desktop(VD) + SteamVR 환경에 맞게 보정해서
+던지는 방향과 세기가 손동작대로 나가게 합니다.
 지연이나 떨림은 추가되지 않습니다.
 
   - 적용: SteamVR 게임 (예: Half-Life: Alyx)
   - 미적용: VDXR(OpenXR)로 직접 실행되는 게임
   - 자동 판별: 필요한 기기(Galaxy XR)에만 적용하고,
-    Quest / Steam Link 처럼 정상인 기기에서는 스스로 꺼집니다.
+    Quest / Steam Link 에서는 스스로 꺼집니다.
     (판별 전 처음 몇 초는 보정을 적용한 상태로 시작합니다)
   - OpenVR Space Calibrator, 라이트하우스 컨트롤러(GripVR 등)와 함께 사용 가능
     (라이트하우스 컨트롤러에는 적용되지 않습니다)
@@ -43,8 +42,7 @@ SteamVR 실행 중에 저장하면 1초 안에 반영됩니다 (재시작 불필
   releaseHoldMs=60       놓은 뒤 이 시간(ms) 동안 최고 속도를 유지
                          힘이 아직 빠지면 200~300 / 80~100 으로 늘려 보세요.
 
-참고: 그동안 던지는 힘이 약하게 나가고 있었기 때문에, 처음에는 정상 세기가
-오히려 세게 느껴질 수 있습니다.
+참고: 처음에는 던지는 힘이 이전보다 세게 느껴질 수 있습니다.
 
 [알려진 한계]
 - 컨트롤러가 헤드셋 카메라 시야를 벗어나면 위치가 멈춰 있을 수 있습니다.
@@ -64,8 +62,8 @@ SteamVR 실행 중에 저장하면 1초 안에 반영됩니다 (재시작 불필
 
 ----------------------------------------------------------------
 English (short)
-Fixes throws going sideways / weak when using Samsung Galaxy XR controllers
-through Virtual Desktop in SteamVR games. No added latency or jitter.
+Tunes Samsung Galaxy XR controllers for SteamVR games through Virtual Desktop:
+throws follow your hand motion in direction and strength. No added latency or jitter.
 Auto-detection: the fix turns itself off on devices that don't need it
 (Quest via VD, Steam Link). Lighthouse controllers are not touched.
 Install: close SteamVR, extract to a permanent folder, run install.bat.

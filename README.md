@@ -1,16 +1,14 @@
 # WYGxrControllerFix
 
-SteamVR add-on that fixes Samsung **Galaxy XR** controller issues when playing PCVR through **Virtual Desktop**.
+SteamVR add-on that tunes Samsung **Galaxy XR** controllers for PCVR through **Virtual Desktop**.
 
 [한국어 설명](#한국어)
 
-## What it fixes
+## Features
 
-- **Throws going sideways or weak**: objects thrown with Galaxy XR controllers in SteamVR games
-  now fly straight and with full strength.
-- **Late releases losing the throw**: if you let go slightly after the peak of your swing,
-  the throw keeps its speed (release boost, on by default).
-- **Automatic**: active only when needed for Galaxy XR. Quest and Steam Link are left untouched.
+- **Throw tuning**: throws follow your hand motion in direction and strength in SteamVR games.
+- **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed (on by default).
+- **Automatic**: active for Galaxy XR only. Quest and Steam Link are left untouched.
 
 **Planned**: keep controllers following your body when they leave the headset cameras,
 and smooth re-acquisition.
@@ -58,9 +56,9 @@ MIT. Third-party: MinHook (BSD 2-Clause), OpenVR headers (BSD 3-Clause), OpenXR 
 
 ## 한국어
 
-Galaxy XR을 Virtual Desktop으로 SteamVR에 연결했을 때 생기는 컨트롤러 문제를 고치는 SteamVR 애드온입니다.
+Galaxy XR 컨트롤러를 Virtual Desktop + SteamVR 환경에 맞게 다듬는 SteamVR 애드온입니다.
 
-- **던지기 보정**: SteamVR 게임에서 물건이 옆으로 날아가거나 약하게 나가던 문제를 고칩니다.
+- **던지기 보정**: SteamVR 게임에서 던지는 방향과 세기가 손동작대로 나갑니다.
 - **놓을 때 속도 보정**: 휘두르는 정점보다 살짝 늦게 놓아도 던지는 힘이 빠지지 않습니다 (기본 켜짐).
 - **자동 판별**: Galaxy XR에서만 켜지고 Quest, Steam Link에서는 꺼집니다.
 - **예정**: 컨트롤러가 카메라 시야를 벗어났을 때 몸을 따라오게 하기, 다시 잡힐 때 부드럽게 이어 붙이기.
