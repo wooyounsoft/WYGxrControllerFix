@@ -14,10 +14,13 @@ if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force (Join-Path $stage 'licenses') | Out-Null
 Copy-Item (Join-Path $root 'deploy\wygxrcontrollerfix') (Join-Path $stage 'wygxrcontrollerfix') -Recurse
+Copy-Item (Join-Path $root 'deploy\openxr') (Join-Path $stage 'openxr') -Recurse
+Get-ChildItem (Join-Path $stage 'openxr') -Exclude '*.dll', '*.json' | Remove-Item -Recurse -Force
 Copy-Item (Join-Path $root 'packaging\*') $stage
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
 Copy-Item (Join-Path $root 'build\_deps\minhook-src\LICENSE.txt') (Join-Path $stage 'licenses\MinHook-LICENSE.txt')
 Copy-Item (Join-Path $root 'third_party\openvr\LICENSE') (Join-Path $stage 'licenses\OpenVR-LICENSE.txt')
+Copy-Item (Join-Path $root 'third_party\openxr\LICENSE') (Join-Path $stage 'licenses\OpenXR-LICENSE.txt')
 
 $zip = Join-Path $root "dist\$name.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }

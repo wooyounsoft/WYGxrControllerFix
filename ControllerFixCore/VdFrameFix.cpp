@@ -47,8 +47,12 @@ void VdFrameDetector::addVote(const Vec3& measured, const Vec3& raw, const Vec3&
     if (m_votes.size() > WINDOW_VOTES) m_votes.pop_front();
     if (m_votes.size() < MIN_VOTES) return;
     double ratio = fixRatio();
-    if (ratio >= DECIDE_RATIO) m_verdict = Verdict::Gxr;
-    else if (ratio <= 1.0 - DECIDE_RATIO) m_verdict = Verdict::Normal;
+    // 판정이 난 뒤에는 잠깐의 애매한 동작으로 뒤집히지 않게 더 강한 다수가 필요하다
+    bool decided = m_verdict != Verdict::Undecided;
+    if (decided && m_votes.size() < WINDOW_VOTES) return;
+    double threshold = decided ? SWITCH_RATIO : DECIDE_RATIO;
+    if (ratio >= threshold) m_verdict = Verdict::Gxr;
+    else if (ratio <= 1.0 - threshold) m_verdict = Verdict::Normal;
 }
 
 double VdFrameDetector::fixRatio() const {

@@ -1,5 +1,9 @@
 #pragma once
 
+#include <map>
+#include <mutex>
+#include <string>
+
 #include <openxr/openxr.h>
 #include <openxr/openxr_loader_negotiation.h>
 
@@ -18,4 +22,25 @@ struct InstanceDispatch {
     PFN_xrLocateSpace locateSpace = nullptr;
     PFN_xrLocateSpaces locateSpaces = nullptr;
     PFN_xrLocateSpacesKHR locateSpacesKHR = nullptr;
+    PFN_xrSuggestInteractionProfileBindings suggestInteractionProfileBindings = nullptr;
+    PFN_xrGetActionStateFloat getActionStateFloat = nullptr;
+    PFN_xrGetActionStateBoolean getActionStateBoolean = nullptr;
+    // 가로채지 않고 레이어가 직접 쓰는 함수
+    PFN_xrPathToString pathToString = nullptr;
+
+    std::mutex pathMutex;
+    std::map<XrPath, std::string> pathNames;
+
+    std::string pathName(XrPath path) {
+        if (path == XR_NULL_PATH || !pathToString) return {};
+        std::lock_guard lock(pathMutex);
+        auto it = pathNames.find(path);
+        if (it != pathNames.end()) return it->second;
+        char buffer[XR_MAX_PATH_LENGTH];
+        uint32_t length = 0;
+        std::string name;
+        if (XR_SUCCEEDED(pathToString(instance, path, XR_MAX_PATH_LENGTH, &length, buffer))) name = buffer;
+        pathNames[path] = name;
+        return name;
+    }
 };

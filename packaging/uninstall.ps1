@@ -1,8 +1,17 @@
-﻿# WYGxrControllerFix 제거: SteamVR 등록을 해제한다.
+﻿# WYGxrControllerFix 제거: SteamVR 등록과 VDXR(OpenXR) 레이어 등록을 해제한다.
 $ErrorActionPreference = 'Stop'
 
 $driverDir = Join-Path $PSScriptRoot 'wygxrcontrollerfix'
 $pathsFile = Join-Path $env:LOCALAPPDATA 'openvr\openvrpaths.vrpath'
+
+$layerKey = 'HKCU:\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit'
+$layerFileName = 'XR_APILAYER_WY_gxr_controllerfix.json'
+if (Test-Path $layerKey) {
+    foreach ($name in (Get-Item $layerKey).GetValueNames()) {
+        if ((Split-Path $name -Leaf) -eq $layerFileName) { Remove-ItemProperty -Path $layerKey -Name $name }
+    }
+}
+Write-Host 'VDXR 레이어 등록 해제 / OpenXR layer removed'
 
 if (Get-Process vrserver -ErrorAction SilentlyContinue) {
     Write-Host 'SteamVR을 먼저 종료하세요 / Please close SteamVR first.'

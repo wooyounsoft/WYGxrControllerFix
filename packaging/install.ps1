@@ -1,4 +1,4 @@
-﻿# WYGxrControllerFix 설치: 드라이버 폴더를 SteamVR에 등록한다.
+﻿# WYGxrControllerFix 설치: 드라이버 폴더를 SteamVR에 등록하고 VDXR(OpenXR) 레이어를 등록한다.
 $ErrorActionPreference = 'Stop'
 
 $driverDir = Join-Path $PSScriptRoot 'wygxrcontrollerfix'
@@ -13,6 +13,20 @@ if (-not (Test-Path (Join-Path $driverDir 'driver.vrdrivermanifest'))) {
     Write-Host "드라이버 폴더를 찾을 수 없습니다 / Driver folder not found: $driverDir"
     exit 1
 }
+# VDXR(OpenXR) 게임용 레이어 등록 (현재 사용자, 관리자 권한 불필요)
+$layerJson = Join-Path $PSScriptRoot 'openxr\XR_APILAYER_WY_gxr_controllerfix.json'
+$layerKey = 'HKCU:\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit'
+$layerFileName = Split-Path $layerJson -Leaf
+if (-not (Test-Path $layerKey)) { New-Item -Path $layerKey -Force | Out-Null }
+# 다른 폴더에 등록된 같은 레이어는 두 번 적용되지 않도록 지운다
+foreach ($name in (Get-Item $layerKey).GetValueNames()) {
+    if ((Split-Path $name -Leaf) -eq $layerFileName -and $name -ne $layerJson) {
+        Remove-ItemProperty -Path $layerKey -Name $name
+    }
+}
+New-ItemProperty -Path $layerKey -Name $layerJson -PropertyType DWord -Value 0 -Force | Out-Null
+Write-Host "VDXR 레이어 등록 / OpenXR layer registered: $layerJson"
+
 if (Get-Process vrserver -ErrorAction SilentlyContinue) {
     Write-Host 'SteamVR을 먼저 종료하세요 / Please close SteamVR first.'
     exit 1

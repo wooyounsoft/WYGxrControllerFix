@@ -100,7 +100,9 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateActionSpace(XrSession session, cons
             std::lock_guard lock(g_mapMutex);
             g_spaces[*space] = d;
         }
-        if (d->active) SpaceVelocityFixer::I().onActionSpaceCreated(*space);
+        if (d->active && info)
+            SpaceVelocityFixer::I().onActionSpaceCreated(*space, info->action,
+                                                         SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)));
     }
     return r;
 }
@@ -154,6 +156,39 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrLocateSpacesKHR(XrSession session, const 
     return r;
 }
 
+// 그립 액션과 손을 기록한다 (해제 보정).
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrSuggestInteractionProfileBindings(XrInstance instance, const XrInteractionProfileSuggestedBinding* suggested) {
+    InstanceDispatch* d = byInstance(instance);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    XrResult r = d->suggestInteractionProfileBindings(instance, suggested);
+    if (XR_SUCCEEDED(r) && d->active && suggested) {
+        for (uint32_t i = 0; i < suggested->countSuggestedBindings; ++i) {
+            const XrActionSuggestedBinding& b = suggested->suggestedBindings[i];
+            std::string path = d->pathName(b.binding);
+            SpaceVelocityFixer::I().onBinding(b.action, SpaceVelocityFixer::handOf(path), SpaceVelocityFixer::kindOf(path));
+        }
+    }
+    return r;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateFloat(XrSession session, const XrActionStateGetInfo* info, XrActionStateFloat* state) {
+    InstanceDispatch* d = bySession(session);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    XrResult r = d->getActionStateFloat(session, info, state);
+    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive)
+        SpaceVelocityFixer::I().onActionState(info->action, SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)), state->currentState);
+    return r;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateBoolean(XrSession session, const XrActionStateGetInfo* info, XrActionStateBoolean* state) {
+    InstanceDispatch* d = bySession(session);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    XrResult r = d->getActionStateBoolean(session, info, state);
+    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive)
+        SpaceVelocityFixer::I().onActionState(info->action, SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)), state->currentState ? 1.0 : 0.0);
+    return r;
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
 
 // 다음 레이어/런타임 함수를 얻어서, 있으면 우리 함수로 바꿔 돌려준다.
@@ -178,6 +213,10 @@ XrResult wrapByName(InstanceDispatch& d, const char* name, PFN_xrVoidFunction* f
     if (std::strcmp(name, "xrLocateSpace") == 0) return wrap(d, name, function, d.locateSpace, &Layer_xrLocateSpace);
     if (std::strcmp(name, "xrLocateSpaces") == 0) return wrap(d, name, function, d.locateSpaces, &Layer_xrLocateSpaces);
     if (std::strcmp(name, "xrLocateSpacesKHR") == 0) return wrap(d, name, function, d.locateSpacesKHR, &Layer_xrLocateSpacesKHR);
+    if (std::strcmp(name, "xrSuggestInteractionProfileBindings") == 0)
+        return wrap(d, name, function, d.suggestInteractionProfileBindings, &Layer_xrSuggestInteractionProfileBindings);
+    if (std::strcmp(name, "xrGetActionStateFloat") == 0) return wrap(d, name, function, d.getActionStateFloat, &Layer_xrGetActionStateFloat);
+    if (std::strcmp(name, "xrGetActionStateBoolean") == 0) return wrap(d, name, function, d.getActionStateBoolean, &Layer_xrGetActionStateBoolean);
     handled = false;
     return XR_ERROR_FUNCTION_UNSUPPORTED;
 }
@@ -225,12 +264,14 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateApiLayerInstance(const XrInstanceCr
     d->getInstanceProcAddr = nextGipa;
     // 로더가 이후 xrGetInstanceProcAddr 로 다시 요청하지만, 직접 호출 경로 대비 미리 채움
     const char* hooked[] = {"xrDestroyInstance", "xrCreateSession", "xrDestroySession", "xrCreateReferenceSpace",
-                            "xrCreateActionSpace", "xrDestroySpace", "xrLocateSpace"};
+                            "xrCreateActionSpace", "xrDestroySpace", "xrLocateSpace",
+                            "xrSuggestInteractionProfileBindings", "xrGetActionStateFloat", "xrGetActionStateBoolean"};
     for (const char* name : hooked) {
         PFN_xrVoidFunction fn = nullptr;
         bool handled = false;
         wrapByName(*d, name, &fn, handled);
     }
+    nextGipa(*instance, "xrPathToString", reinterpret_cast<PFN_xrVoidFunction*>(&d->pathToString));
     d->active = SpaceVelocityFixer::I().onInstanceCreated(info->applicationInfo.applicationName, runtimeName(*d));
 
     std::lock_guard lock(g_mapMutex);

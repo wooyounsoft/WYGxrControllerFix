@@ -30,7 +30,8 @@ public:
     static constexpr double AMBIGUOUS_DEG = 10.0;     // 두 오차 차이가 이보다 작으면 기권
     static constexpr size_t WINDOW_VOTES = 120;
     static constexpr size_t MIN_VOTES = 40;
-    static constexpr double DECIDE_RATIO = 0.7;       // 이 비율 이상이면 판정, 사이 값은 이전 판정 유지
+    static constexpr double DECIDE_RATIO = 0.7;       // 첫 판정: 이 비율 이상이면 판정, 사이 값은 판정 보류
+    static constexpr double SWITCH_RATIO = 0.9;       // 판정 뒤에 뒤집으려면 창 전체에서 이 비율 이상이어야 함
 
     // measured: 포즈로 추정한 실제 선속도, raw: 원래 값, fixed: 보정 값 (모두 world)
     void addVote(const Vec3& measured, const Vec3& raw, const Vec3& fixed);

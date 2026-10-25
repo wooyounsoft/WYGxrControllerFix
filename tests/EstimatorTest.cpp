@@ -4,6 +4,7 @@
 
 #include "QuatMath.h"
 #include "ReleaseBoost.h"
+#include "VdFrameFit.h"
 #include "VdFrameFix.h"
 #include "VelocityEstimator.h"
 
@@ -210,9 +211,99 @@ VdFrameDetector::Verdict runDetector(bool gxr) {
     return detector.verdict();
 }
 
+// 판정 뒤에는 애매한 구간(70% 정도)이 와도 뒤집히지 않는다
+void testVdFrameDetectorSticky() {
+    constexpr int NORMAL_VOTES = 120;
+    constexpr int MIXED_VOTES = 400;
+    constexpr int MIXED_FIX_EVERY = 10;  // 10번 중 7번 보정 쪽
+    constexpr int MIXED_FIX_COUNT = 7;
+    VdFrameDetector detector;
+    Vec3 measured{THROW_SPEED, 0, 0};
+    Vec3 good = measured, bad{0, THROW_SPEED, 0};
+    for (int i = 0; i < NORMAL_VOTES; ++i) detector.addVote(measured, good, bad);
+    bool normal = detector.verdict() == VdFrameDetector::Verdict::Normal;
+    for (int i = 0; i < MIXED_VOTES; ++i) {
+        bool fixWins = i % MIXED_FIX_EVERY < MIXED_FIX_COUNT;
+        detector.addVote(measured, fixWins ? bad : good, fixWins ? good : bad);
+    }
+    check(normal && detector.verdict() == VdFrameDetector::Verdict::Normal, "vd frame detector: sticky verdict", detector.fixRatio(), 0.7);
+}
+
 void testVdFrameDetector() {
     check(runDetector(true) == VdFrameDetector::Verdict::Gxr, "vd frame detector: GXR -> fix", 0, 0);
     check(runDetector(false) == VdFrameDetector::Verdict::Normal, "vd frame detector: normal -> no fix", 0, 0);
+}
+
+// 프레임 맞추기: 기본 공식(13°)과 다른 보정 회전도 움직임으로 찾아낸다
+constexpr double FIT_DEG_TO_RAD = 3.14159265358979323846 / 180.0;
+constexpr double FIT_PRIOR_PITCH_DEG = VdFrameFixConfig::DEFAULT_PITCH_DEG;
+
+Quat fitTestRotation() {
+    constexpr double TRUE_PITCH_DEG = 40;  // 포즈 오프셋이 섞인 실제 보정 회전
+    constexpr double TRUE_YAW_DEG = 20;
+    Quat b{std::cos(TRUE_PITCH_DEG * FIT_DEG_TO_RAD / 2), std::sin(TRUE_PITCH_DEG * FIT_DEG_TO_RAD / 2), 0, 0};
+    return multiply(yawQuat(TRUE_YAW_DEG * FIT_DEG_TO_RAD), b);
+}
+
+void runFrameFit(bool needsFix, VdFrameFit& fit) {
+    constexpr int SAMPLES = 400;
+    constexpr double YAW_STEP = 0.37;
+    constexpr double PITCH_STEP = 0.23;
+    constexpr double ROLL_STEP = 0.11;
+    constexpr double NOISE = 0.15;  // m/s, 측정 잡음
+    Quat fix = fitTestRotation();
+    for (int i = 0; i < SAMPLES; ++i) {
+        Quat roll{std::cos(i * ROLL_STEP / 2), 0, 0, std::sin(i * ROLL_STEP / 2)};
+        Quat tilt{std::cos(i * PITCH_STEP / 2), std::sin(i * PITCH_STEP / 2), 0, 0};
+        Quat poseRotation = multiply(multiply(yawQuat(i * YAW_STEP), tilt), roll);
+        Vec3 world{THROW_SPEED * std::cos(i * YAW_STEP), 1.0 + std::sin(i * ROLL_STEP), THROW_SPEED * std::sin(i * PITCH_STEP)};
+        Vec3 reported = needsFix ? rotate(conjugate(fix), rotate(conjugate(poseRotation), world)) : world;
+        Vec3 measured{world.x + NOISE * std::sin(i * 1.7), world.y + NOISE * std::cos(i * 2.3), world.z - NOISE * std::sin(i * 0.9)};
+        fit.addSample(i * SAMPLE_INTERVAL_SEC * 10, poseRotation, measured, reported);
+    }
+    if (!needsFix) return;
+    Quat poseRotation = multiply(yawQuat(1.0), Quat{std::cos(0.4), std::sin(0.4), 0, 0});
+    Vec3 world{THROW_SPEED, -1.0, 2.0};
+    Vec3 fixed = fit.apply(poseRotation, rotate(conjugate(fix), rotate(conjugate(poseRotation), world)));
+    double err = length3(fixed.x - world.x, fixed.y - world.y, fixed.z - world.z) / length3(world.x, world.y, world.z);
+    check(err < TOLERANCE_LINEAR, "frame fit recovers rotation", err, 0);
+}
+
+// 기본 공식과 많이 다른 공간(앱마다 다른 포즈 오프셋)도 맞추기 전에 '필요 없음'으로 꺼지지 않는다
+void testVdFrameFitLargeOffsetNeverNormal() {
+    constexpr int SAMPLES = 400;
+    constexpr double OFFSET_PITCH_DEG = 70;
+    constexpr double YAW_STEP = 0.37;
+    constexpr double PITCH_STEP = 0.23;
+    constexpr double ROLL_STEP = 0.11;
+    Quat fix{std::cos(OFFSET_PITCH_DEG * FIT_DEG_TO_RAD / 2), std::sin(OFFSET_PITCH_DEG * FIT_DEG_TO_RAD / 2), 0, 0};
+    VdFrameFit fit(FIT_PRIOR_PITCH_DEG);
+    bool everNormal = false;
+    for (int i = 0; i < SAMPLES; ++i) {
+        Quat roll{std::cos(i * ROLL_STEP / 2), 0, 0, std::sin(i * ROLL_STEP / 2)};
+        Quat tilt{std::cos(i * PITCH_STEP / 2), std::sin(i * PITCH_STEP / 2), 0, 0};
+        Quat poseRotation = multiply(multiply(yawQuat(i * YAW_STEP), tilt), roll);
+        Vec3 world{THROW_SPEED * std::cos(i * YAW_STEP), 1.0 + std::sin(i * ROLL_STEP), THROW_SPEED * std::sin(i * PITCH_STEP)};
+        fit.addSample(i * SAMPLE_INTERVAL_SEC * 10, poseRotation, world, rotate(conjugate(fix), rotate(conjugate(poseRotation), world)));
+        everNormal = everNormal || fit.verdict() == VdFrameFit::Verdict::Normal;
+    }
+    check(!everNormal && fit.verdict() == VdFrameFit::Verdict::Fix, "frame fit: large offset never 'not needed'", fit.fitErrorDeg(), fit.rawErrorDeg());
+}
+
+void testVdFrameFit() {
+    testVdFrameFitLargeOffsetNeverNormal();
+    VdFrameFit gxr(FIT_PRIOR_PITCH_DEG), normal(FIT_PRIOR_PITCH_DEG);
+    // 샘플 전에는 기본 공식 = SteamVR 쪽 보정과 같다
+    Quat poseRotation = multiply(yawQuat(0.7), Quat{std::cos(0.3), std::sin(0.3), 0, 0});
+    Vec3 reported{1.0, -2.0, 0.5};
+    Vec3 a = gxr.apply(poseRotation, reported);
+    Vec3 b = vdLocalToWorld(poseRotation, reported, FIT_PRIOR_PITCH_DEG);
+    check(length3(a.x - b.x, a.y - b.y, a.z - b.z) < 1e-9, "frame fit: default = steamvr formula", 0, 0);
+
+    runFrameFit(true, gxr);
+    check(gxr.verdict() == VdFrameFit::Verdict::Fix && gxr.refined(), "frame fit: GXR -> fix (fitted)", gxr.fitErrorDeg(), gxr.rawErrorDeg());
+    runFrameFit(false, normal);
+    check(normal.verdict() == VdFrameFit::Verdict::Normal, "frame fit: normal -> no fix", normal.fitErrorDeg(), normal.rawErrorDeg());
 }
 
 }  // namespace
@@ -220,6 +311,8 @@ void testVdFrameDetector() {
 int main() {
     testVdFrameFixInverts();
     testVdFrameDetector();
+    testVdFrameDetectorSticky();
+    testVdFrameFit();
     testReleaseBoostUsesPeak();
     testReleaseBoostIgnoresOldPeakAndSlowMoves();
     testSpikeRejected();
