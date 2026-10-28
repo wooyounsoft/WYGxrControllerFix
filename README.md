@@ -39,8 +39,8 @@ Settings: `%LOCALAPPDATA%\WYGxrControllerFix\settings.ini` (applied live while a
 Manager: run `manager.bat`. It shows whether the add-on and the VDXR layer are registered,
 whether the fix was active (`GXR detected -> fix ON`) in the last SteamVR / VDXR game,
 and turns the fixes on/off (applies within 1 s, even in game).
-For the last VDXR game it also shows whether the game uses the runtime's velocity for throws
-(the fix applies) or computes throws from hand movement itself (works anyway, fix not involved).
+For the last VDXR game it also shows whether the game requests the runtime's velocity (the fix applies; whether throws actually use it
+depends on the game) or never asks for it (throws are computed from hand movement, fix not involved).
 
 **Scope**: SteamVR games and VDXR games through Virtual Desktop.
 In VDXR games the effect depends on the game: games that calculate throws from hand movement
@@ -84,7 +84,7 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 
 설치: [Releases](../../releases)에서 zip을 받아 고정된 폴더에 풀고, SteamVR을 끈 상태에서 `install.bat`을 실행합니다.
 관리 도구: `manager.bat`을 실행하면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 주고, 보정을 켜고 끌 수 있습니다.
-마지막 VDXR 게임이 던지기에 런타임 속도를 쓰는지(보정 적용), 손 움직임으로 직접 계산하는지(원래도 잘 됨)도 보여 줍니다.
+마지막 VDXR 게임이 런타임 속도를 요청하는지(보정 적용, 던지기에 실제로 쓰는지는 게임마다 다름), 아예 요청하지 않는지(손 움직임으로 직접 계산, 보정 영향 없음)도 보여 줍니다.
 자세한 설명은 zip 안의 `README.txt`를 보세요.
 
 **Steam Link도 쓰는 분**: Steam Link용 Galaxy XR 드라이버(GalaxyXR-Driver / Galaxy XR Companion, `GalaxyXRNative`)를

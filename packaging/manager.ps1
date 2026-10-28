@@ -77,8 +77,8 @@ function Show-VelocityUse([string[]]$lines) {
         Write-Host '                     throw method: computed from hand movement -> works anyway, fix not involved'
         return $true
     }
-    Write-Host '        던지기 방식: 런타임 속도 사용 → 보정이 적용되는 게임' -ForegroundColor Yellow
-    Write-Host '                     throw method: uses runtime velocity -> the fix applies to this game'
+    Write-Host '        던지기 방식: 런타임 속도를 요청함 → 보정 적용 (던지기에 실제로 쓰는지는 게임마다 다름)' -ForegroundColor Yellow
+    Write-Host '                     throw method: requests runtime velocity -> fix applied (whether throws use it depends on the game)'
     return $false
 }
 
