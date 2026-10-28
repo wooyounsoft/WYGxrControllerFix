@@ -71,6 +71,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 [문제 해결 / 피드백]
 - manager.bat (관리 도구): 설치 상태, 마지막 게임에서 보정이 켜졌는지 보여 주고,
   보정 전체 / VDXR 게임 보정 / 놓을 때 속도 보정을 번호로 켜고 끕니다 (게임 중에도 1초 안에 반영).
+  마지막 VDXR 게임의 던지기 방식도 보여 줍니다: 런타임 속도 사용(보정 적용) /
+  손 움직임으로 직접 계산(원래도 잘 되는 게임, 보정 영향 없음).
 - 동작 확인 (SteamVR): C:\Program Files (x86)\Steam\logs\vrserver.txt 에서 "WYGxrControllerFix" 검색
     "TARGET"                       컨트롤러에 적용 중
     "GXR detected -> fix ON"       Galaxy XR 감지, 보정 사용
@@ -101,7 +103,8 @@ Install: close SteamVR, extract to a permanent folder, run install.bat
 Uninstall: close SteamVR, run uninstall.bat, delete the folder.
 Settings: %LOCALAPPDATA%\WYGxrControllerFix\settings.ini (live reload)
 Manager: run manager.bat to see the status (registration, whether the fix was active in the
-last game) and to turn the fixes on/off (applies within 1 s, even in game).
+last game) and to turn the fixes on/off (applies within 1 s, even in game). For the last VDXR game
+it also shows whether the game uses the runtime's velocity for throws or computes them itself.
   vdFrameFix=auto|1|0, linearScale (default 1.0),
   releaseBoost=0|1 (default 1: holds the peak speed of the last 150 ms for 60 ms
   after grip release; tune with releasePeakMs / releaseHoldMs).
