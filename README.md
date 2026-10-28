@@ -81,3 +81,7 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 설치: [Releases](../../releases)에서 zip을 받아 고정된 폴더에 풀고, SteamVR을 끈 상태에서 `install.bat`을 실행합니다.
 관리 도구: `manager.bat`을 실행하면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 주고, 보정을 켜고 끌 수 있습니다.
 자세한 설명은 zip 안의 `README.txt`를 보세요.
+
+**Steam Link도 쓰는 분**: Steam Link용 Galaxy XR 드라이버(GalaxyXR-Driver / Galaxy XR Companion, `GalaxyXRNative`)를
+설치했다면, Virtual Desktop으로 할 때는 꺼 주세요 (SteamVR 설정 → 시작/종료 → 애드온 관리).
+Virtual Desktop 세션에도 개입해서 던지기가 어색해질 수 있습니다. Steam Link으로 할 때 다시 켜면 됩니다.
