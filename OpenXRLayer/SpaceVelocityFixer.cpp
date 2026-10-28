@@ -22,6 +22,7 @@ constexpr XrSpaceVelocityFlags VELOCITY_VALID = XR_SPACE_VELOCITY_LINEAR_VALID_B
 constexpr const char* LEFT_HAND_PATH = "/user/hand/left";
 constexpr const char* RIGHT_HAND_PATH = "/user/hand/right";
 constexpr const char* SQUEEZE_PATH = "/input/squeeze";
+constexpr const char* THUMBSTICK_PATH = "/input/thumbstick";
 
 // analyze_capture.py 와 같은 형식
 constexpr const char* CAPTURE_HEADER =
@@ -93,6 +94,9 @@ SpaceVelocityFixer::Hand SpaceVelocityFixer::handOf(const std::string& path) {
 
 SpaceVelocityFixer::BindingKind SpaceVelocityFixer::kindOf(const std::string& bindingPath) {
     if (bindingPath.find(SQUEEZE_PATH) != std::string::npos) return BindingKind::Grip;
+    // 2축 스틱 자체 (".../thumbstick/click" 같은 하위 경로는 제외)
+    size_t stick = bindingPath.rfind(THUMBSTICK_PATH);
+    if (stick != std::string::npos && stick + std::string(THUMBSTICK_PATH).size() == bindingPath.size()) return BindingKind::Stick;
     return BindingKind::Other;
 }
 
@@ -115,9 +119,30 @@ void SpaceVelocityFixer::onBinding(XrAction action, Hand hand, BindingKind kind)
     if (kind != BindingKind::Other) m_actionKinds[action] = kind;
 }
 
-void SpaceVelocityFixer::onActionSpaceCreated(XrSpace space, XrAction action, Hand hand) {
+void SpaceVelocityFixer::onActionSpaceCreated(XrSpace space, XrSession session, XrAction action, Hand hand) {
     std::lock_guard lock(m_mutex);
-    m_actionSpaces[space] = {action, hand};
+    m_actionSpaces[space] = {session, action, hand};
+}
+
+void SpaceVelocityFixer::onStickState(XrAction action, XrVector2f& value) {
+    std::lock_guard lock(m_mutex);
+    if (!m_settings.enabled || !m_settings.stick.enabled) return;
+    auto kind = m_actionKinds.find(action);
+    if (kind == m_actionKinds.end() || kind->second != BindingKind::Stick) return;
+    controllerfix::Vec2 shaped = controllerfix::shapeStick(m_settings.stick, {value.x, value.y});
+    value.x = static_cast<float>(shaped.x);
+    value.y = static_cast<float>(shaped.y);
+}
+
+void SpaceVelocityFixer::tuneHaptic(XrHapticVibration& vibration) {
+    std::lock_guard lock(m_mutex);
+    if (!m_settings.enabled || !m_settings.haptic.enabled) return;
+    double amplitude = vibration.amplitude;
+    double durationSec = vibration.duration > 0 ? static_cast<double>(vibration.duration) / NANOSECONDS_PER_SECOND : 0;
+    controllerfix::tuneHaptic(m_settings.haptic, amplitude, durationSec);
+    vibration.amplitude = static_cast<float>(amplitude);
+    if (vibration.duration > 0) vibration.duration = static_cast<XrDuration>(durationSec * NANOSECONDS_PER_SECOND);
+    ++m_hapticCount;
 }
 
 void SpaceVelocityFixer::onSpaceDestroyed(XrSpace space) {
@@ -183,8 +208,8 @@ void SpaceVelocityFixer::logStats() {
     auto now = std::chrono::steady_clock::now();
     if (now < m_nextStatsLog) return;
     m_nextStatsLog = now + STATS_LOG_INTERVAL;
-    LayerLog("stats: actionSpaces=%zu locates=%llu velocityRequested=%llu replaced=%llu boosts=%llu", m_actionSpaces.size(),
-             m_locateCount, m_velocityRequestCount, m_replacedCount, m_boostCount);
+    LayerLog("stats: actionSpaces=%zu locates=%llu velocityRequested=%llu replaced=%llu boosts=%llu haptics=%llu",
+             m_actionSpaces.size(), m_locateCount, m_velocityRequestCount, m_replacedCount, m_boostCount, m_hapticCount);
 }
 
 void SpaceVelocityFixer::logVerdict(XrSpace space, PairState& ps) {
@@ -250,8 +275,41 @@ controllerfix::Vec3 SpaceVelocityFixer::fixVelocity(PairState& ps, const control
     return ps.fit.apply(rotation, reported);
 }
 
+bool SpaceVelocityFixer::fixVelocities(PairState& ps, XrSpace space, const controllerfix::PoseSample& sample,
+                                       XrSpaceVelocityFlags flags, controllerfix::VelocityEstimate& out, bool& fixActive) {
+    fixActive = false;
+    bool runtimeLinearValid = (flags & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0;
+    bool runtimeAngularValid = (flags & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0;
+    if (m_settings.vdFix.mode == controllerfix::VdFixMode::Off) {
+        // 추정 방식: 느릴 때는 런타임 값, 빠를 때는 포즈 기록 추정값
+        controllerfix::VelocityEstimate e;
+        if (!ps.estimator.estimate(e)) return false;
+        controllerfix::BlendWeights w{1.0, 1.0};
+        if (m_settings.blendEnabled) w = controllerfix::computeBlendWeights(e, m_settings.blend);
+        if (m_settings.replaceLinear) out.linear = runtimeLinearValid ? controllerfix::lerp(out.linear, e.linear, w.linear) : e.linear;
+        if (m_settings.replaceAngular) out.angular = runtimeAngularValid ? controllerfix::lerp(out.angular, e.angular, w.angular) : e.angular;
+        fixActive = true;
+        return true;
+    }
+    if (!runtimeLinearValid) return false;
+    if (m_settings.vdFix.mode == controllerfix::VdFixMode::Auto) {
+        controllerfix::VelocityEstimate measured;
+        if (ps.estimator.estimate(measured)) ps.fit.addSample(sample.timeSec, sample.rotation, measured.linear, out.linear);
+        logVerdict(space, ps);
+        // 판정 전에는 기본 공식으로 적용한다 (설치 대상이 GXR 사용자). 필요 없는 기기로 판정되면 원래 값.
+        if (ps.fit.verdict() == controllerfix::VdFrameFit::Verdict::Normal) return false;
+    }
+    out.linear = scaled(fixVelocity(ps, sample.rotation, out.linear), m_settings.estimator.linearScale);
+    // 각속도는 한 번 더 로컬 기준으로 들어온다: ω = R · B · R · ω_reported (SteamVR 드라이버 각속도와 같은 형태)
+    if (runtimeAngularValid)
+        out.angular = scaled(fixVelocity(ps, sample.rotation, controllerfix::rotate(sample.rotation, out.angular)),
+                             m_settings.estimator.angularScale);
+    fixActive = true;
+    return true;
+}
+
 void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time,
-                                 XrSpaceLocationFlags locationFlags, const XrPosef& pose,
+                                 XrSpaceLocationFlags locationFlags, XrPosef& pose,
                                  XrSpaceVelocityFlags* velocityFlags, XrVector3f* linear, XrVector3f* angular) {
     std::lock_guard lock(m_mutex);
     pollSettings();
@@ -282,40 +340,30 @@ void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSp
     ps.estimator.addSample(sample);
     ps.lastSampleSec = sample.timeSec;
 
-    if (!velocityFlags) return;
-    ++m_velocityRequestCount;
-    bool runtimeLinearValid = (*velocityFlags & XR_SPACE_VELOCITY_LINEAR_VALID_BIT) != 0;
-    bool runtimeAngularValid = (*velocityFlags & XR_SPACE_VELOCITY_ANGULAR_VALID_BIT) != 0;
-
-    controllerfix::VelocityEstimate out{toVec3(*linear), toVec3(*angular)};
-    if (m_settings.vdFix.mode == controllerfix::VdFixMode::Off) {
-        // 추정 방식: 느릴 때는 런타임 값, 빠를 때는 포즈 기록 추정값
-        controllerfix::VelocityEstimate e;
-        if (!ps.estimator.estimate(e)) return;
-        controllerfix::BlendWeights w{1.0, 1.0};
-        if (m_settings.blendEnabled) w = controllerfix::computeBlendWeights(e, m_settings.blend);
-        if (m_settings.replaceLinear) out.linear = runtimeLinearValid ? controllerfix::lerp(out.linear, e.linear, w.linear) : e.linear;
-        if (m_settings.replaceAngular) out.angular = runtimeAngularValid ? controllerfix::lerp(out.angular, e.angular, w.angular) : e.angular;
-    } else {
-        if (!runtimeLinearValid) return;
-        if (m_settings.vdFix.mode == controllerfix::VdFixMode::Auto) {
-            controllerfix::VelocityEstimate measured;
-            if (ps.estimator.estimate(measured)) ps.fit.addSample(sample.timeSec, sample.rotation, measured.linear, out.linear);
-            logVerdict(space, ps);
-            // 판정 전에는 기본 공식으로 적용한다 (설치 대상이 GXR 사용자). 필요 없는 기기로 판정되면 원래 값.
-            if (ps.fit.verdict() == controllerfix::VdFrameFit::Verdict::Normal) return;
-        }
-        out.linear = scaled(fixVelocity(ps, sample.rotation, out.linear), m_settings.estimator.linearScale);
-        // 각속도는 한 번 더 로컬 기준으로 들어온다: ω = R · B · R · ω_reported (SteamVR 드라이버 각속도와 같은 형태)
-        if (runtimeAngularValid)
-            out.angular = scaled(fixVelocity(ps, sample.rotation, controllerfix::rotate(sample.rotation, out.angular)),
-                                 m_settings.estimator.angularScale);
+    // 1. 속도 보정
+    controllerfix::VelocityEstimate out;
+    bool velocityChanged = false;
+    bool fixActive = false;
+    if (velocityFlags) {
+        ++m_velocityRequestCount;
+        out = {toVec3(*linear), toVec3(*angular)};
+        velocityChanged = fixVelocities(ps, space, sample, *velocityFlags, out, fixActive);
     }
 
-    ps.releaseBoost.addVelocity(sample.timeSec, out);
-    controllerfix::VelocityEstimate held;
-    if (ps.releaseBoost.override(sample.timeSec, held)) out = held;  // 그립 해제 직후: 직전 최고 속도 유지
+    // 2. 그립 해제 직후: 직전 최고 속도 유지
+    if (velocityFlags && fixActive) {
+        ps.releaseBoost.addVelocity(sample.timeSec, out);
+        controllerfix::VelocityEstimate held;
+        if (ps.releaseBoost.override(sample.timeSec, held)) out = held;
+    }
 
+    // 4. 컨트롤러 각도 조정 (손 기준 회전, 위치/속도는 그대로)
+    if (m_settings.angleOffset.enabled) {
+        controllerfix::Quat q = controllerfix::multiply(sample.rotation, controllerfix::angleOffsetRotation(m_settings.angleOffset));
+        pose.orientation = {static_cast<float>(q.x), static_cast<float>(q.y), static_cast<float>(q.z), static_cast<float>(q.w)};
+    }
+
+    if (!velocityFlags || !velocityChanged) return;
     assign(*linear, out.linear);
     assign(*angular, out.angular);
     *velocityFlags |= VELOCITY_VALID;

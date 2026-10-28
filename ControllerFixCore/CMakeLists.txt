@@ -4,5 +4,6 @@ add_library(ControllerFixCore STATIC
     ReleaseBoost.cpp
     VdFrameFix.cpp
     VdFrameFit.cpp
+    ControllerTuning.cpp
 )
 target_include_directories(ControllerFixCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -10,6 +10,9 @@ struct ReleaseBoostConfig {
     static constexpr double DEFAULT_PEAK_WINDOW_SEC = 0.150;  // 그립 해제 직전 이 구간의 최고 속도를 사용
     static constexpr double DEFAULT_HOLD_SEC = 0.060;         // 해제 후 이 시간 동안 최고 속도를 유지
     static constexpr double DEFAULT_MIN_SPEED = 1.0;          // m/s, 최고 속도가 이보다 느리면 던지기가 아님
+    // 최고 속도가 해제보다 이만큼 이상 앞서면 던지기가 아님 (멈췄다가 내려놓기).
+    // 실측 (Alyx, 2026-10-28): 던지기 11~67 ms, 내려놓기 100~145 ms
+    static constexpr double DEFAULT_MAX_PEAK_AGE_SEC = 0.080;
     static constexpr double DEFAULT_GRIP_PRESS = 0.7;         // 그립 값 히스테리시스
     static constexpr double DEFAULT_GRIP_RELEASE = 0.4;
 
@@ -17,6 +20,7 @@ struct ReleaseBoostConfig {
     double peakWindowSec = DEFAULT_PEAK_WINDOW_SEC;
     double holdSec = DEFAULT_HOLD_SEC;
     double minSpeed = DEFAULT_MIN_SPEED;
+    double maxPeakAgeSec = DEFAULT_MAX_PEAK_AGE_SEC;
     double gripPress = DEFAULT_GRIP_PRESS;
     double gripRelease = DEFAULT_GRIP_RELEASE;
 };

@@ -1,4 +1,4 @@
-﻿WYGxrControllerFix v0.4.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
+﻿WYGxrControllerFix v0.5.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
 =====================================================================
 
 [무엇을 하나요]
@@ -14,6 +14,9 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
     Quest / Steam Link 에서는 스스로 꺼집니다.
     (판별 전 처음 몇 초는 보정을 적용한 상태로 시작합니다.
      VDXR 게임은 휘두르는 동안 보정을 조금씩 더 정밀하게 다듬습니다)
+  - 손 위치 정확도 (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
+  - 취향 조정 (기본 꺼짐, manager.bat 에서 켜기):
+      진동 강화 / 컨트롤러 각도 조정 / 스틱 데드존과 감도
   - OpenVR Space Calibrator, 라이트하우스 컨트롤러(GripVR 등)와 함께 사용 가능
     (라이트하우스 컨트롤러에는 적용되지 않습니다)
 
@@ -38,6 +41,10 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 게임 실행 중에 저장하면 1초 안에 반영됩니다 (재시작 불필요).
   enabled=0/1            전체 끄기/켜기 (바로 비교해 볼 수 있음)
   openxrEnabled=0/1      VDXR 게임 보정만 끄기/켜기
+  poseLagFix=0/1         손 위치 정확도, SteamVR 게임 (기본 켜짐)
+  hapticBoost=0/1        진동 강화 (기본 꺼짐), hapticGain=1.5 세기 배율, hapticMinMs=20 최소 길이
+  angleOffset=0/1        컨트롤러 각도 조정 (기본 꺼짐), angleOffsetDeg=0 (+ = 앞쪽을 위로)
+  stickTuning=0/1        스틱 조정 (기본 꺼짐), stickDeadzone=0.10, stickCurve=1.0 (클수록 가운데가 덜 민감)
   vdFrameFix=auto        auto = 자동 판별 (권장), 1 = 항상 적용, 0 = 끄기
   linearScale            던지는 힘 배율 (기본 1.0). 너무 세게 느껴지면 0.85~0.9
   angularScale           손목 회전 배율 (기본 1.0)
@@ -47,12 +54,12 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
   releasePeakMs=150      놓기 직전 이 시간(ms) 안의 최고 속도를 사용
   releaseHoldMs=60       놓은 뒤 이 시간(ms) 동안 최고 속도를 유지
                          힘이 아직 빠지면 200~300 / 80~100 으로 늘려 보세요.
+  releaseMaxPeakAgeMs=80 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 적용 안 함
+                         (휘두른 뒤 멈췄다가 내려놓을 때 물건이 튀어 나가지 않게)
 
 참고: 처음에는 던지는 힘이 이전보다 세게 느껴질 수 있습니다.
 
 [알려진 한계]
-- 컨트롤러가 헤드셋 카메라 시야를 벗어나면 위치가 멈춰 있을 수 있습니다.
-  머리 뒤에서 시작하는 던지기는 그 구간이 부정확할 수 있습니다.
 - 게임마다 던지기 처리 방식이 달라서, 라이트하우스 컨트롤러로도 던지기가
   어색한 게임이 있습니다 (예: Battle Sister). 비교는 Half-Life: Alyx 처럼
   던지기가 잘 만들어진 게임에서 해 주세요.
@@ -76,6 +83,9 @@ English (short)
 Tunes Samsung Galaxy XR controllers through Virtual Desktop, for SteamVR games and
 VDXR (OpenXR) games: throws follow your hand motion in direction and strength.
 No added latency or jitter.
+Also: more accurate hand position in SteamVR games,
+and optional tuning (off by default): stronger haptics, controller angle,
+thumbstick deadzone/curve. Turn each on/off in manager.bat.
 Auto-detection: the fix turns itself off on devices that don't need it
 (Quest via VD, Steam Link). Lighthouse controllers are not touched.
 Install: close SteamVR, extract to a permanent folder, run install.bat

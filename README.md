@@ -9,9 +9,8 @@ Tunes Samsung **Galaxy XR** controllers for PCVR through **Virtual Desktop**: St
 - **Throw tuning**: throws follow your hand motion in direction and strength, in SteamVR games and VDXR games.
 - **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed (on by default).
 - **Automatic**: active for Galaxy XR only. Quest and Steam Link are left untouched.
-
-**Planned**: keep controllers following your body when they leave the headset cameras,
-and smooth re-acquisition.
+- **Hand position accuracy** (SteamVR games): hand position and angle match your real hand more closely.
+- **Optional tuning** (off by default): stronger haptics, controller angle, thumbstick deadzone/curve.
 
 ## Install
 
@@ -30,7 +29,12 @@ Settings: `%LOCALAPPDATA%\WYGxrControllerFix\settings.ini` (applied live while a
 | `linearScale` | `1.0` | throw strength multiplier |
 | `releaseBoost` | `1` | keep throw speed after grip release |
 | `releasePeakMs` / `releaseHoldMs` | `150` / `60` | release boost window / hold time |
+| `releaseMaxPeakAgeMs` | `80` | skip the boost when the peak is older than this (stop, then place) |
 | `openxrEnabled` | `1` | VDXR games on/off |
+| `poseLagFix` | `1` | hand position accuracy (SteamVR games) |
+| `hapticBoost` / `hapticGain` / `hapticMinMs` | `0` / `1.5` / `20` | stronger haptics |
+| `angleOffset` / `angleOffsetDeg` | `0` / `0` | controller angle (+ = tip up) |
+| `stickTuning` / `stickDeadzone` / `stickCurve` | `0` / `0.10` / `1.0` | thumbstick deadzone / response curve |
 
 Manager: run `manager.bat`. It shows whether the add-on and the VDXR layer are registered,
 whether the fix was active (`GXR detected -> fix ON`) in the last SteamVR / VDXR game,
@@ -49,7 +53,7 @@ Requires Visual Studio 2022 and CMake 3.20+.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build\Release\EstimatorTest.exe
-tools\package.ps1 -Version 0.4.0
+tools\package.ps1 -Version 0.5.0
 ```
 
 ## License
@@ -66,7 +70,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 - **놓을 때 속도 보정**: 휘두르는 정점보다 살짝 늦게 놓아도 던지는 힘이 빠지지 않습니다 (기본 켜짐).
 - **자동 판별**: Galaxy XR에서만 켜지고 Quest, Steam Link에서는 꺼집니다.
 - **VDXR 게임**: 게임에 따라 효과가 다릅니다. 손 움직임으로 던지기를 직접 계산하는 게임은 원래도 잘 되고, 그대로 둡니다.
-- **예정**: 컨트롤러가 카메라 시야를 벗어났을 때 몸을 따라오게 하기, 다시 잡힐 때 부드럽게 이어 붙이기.
+- **손 위치 정확도** (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
+- **취향 조정** (기본 꺼짐): 진동 강화, 컨트롤러 각도 조정, 스틱 데드존/감도. `manager.bat`에서 켜고 끕니다.
 
 설치: [Releases](../../releases)에서 zip을 받아 고정된 폴더에 풀고, SteamVR을 끈 상태에서 `install.bat`을 실행합니다.
 관리 도구: `manager.bat`을 실행하면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 주고, 보정을 켜고 끌 수 있습니다.

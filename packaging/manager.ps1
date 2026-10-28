@@ -13,10 +13,20 @@ $FixOn = 'fix ON'
 $FixOff = 'fix OFF'
 
 # 메뉴에서 바꿀 수 있는 설정 (키, 기본값, 설명)
+# Params: 값 설정 (키, 기본값, 이름, 최소, 최대)
 $Toggles = [ordered]@{
-    '1' = @{ Key = 'enabled';       Default = '1'; Name = '보정 전체 / all fixes' }
-    '2' = @{ Key = 'openxrEnabled'; Default = '1'; Name = 'VDXR 게임 보정 / VDXR games' }
-    '3' = @{ Key = 'releaseBoost';  Default = '1'; Name = '놓을 때 속도 보정 / release boost' }
+    '1' = @{ Key = 'enabled';        Default = '1'; Name = '보정 전체 / all fixes' }
+    '2' = @{ Key = 'openxrEnabled';  Default = '1'; Name = 'VDXR 게임 보정 / VDXR games' }
+    '3' = @{ Key = 'releaseBoost';   Default = '1'; Name = '놓을 때 속도 보정 / release boost' }
+    '4' = @{ Key = 'poseLagFix';     Default = '1'; Name = '손 위치 정확도 (SteamVR) / hand position accuracy (SteamVR)' }
+    '5' = @{ Key = 'hapticBoost';    Default = '0'; Name = '진동 강화 / stronger haptics'
+             Params = @(@{ Key = 'hapticGain'; Default = '1.5'; Name = '세기 배율 / gain'; Min = 1.0; Max = 4.0 },
+                        @{ Key = 'hapticMinMs'; Default = '20'; Name = '최소 길이 ms / min length ms'; Min = 0; Max = 100 }) }
+    '6' = @{ Key = 'angleOffset';    Default = '0'; Name = '컨트롤러 각도 조정 / controller angle'
+             Params = @(@{ Key = 'angleOffsetDeg'; Default = '0'; Name = '각도 (+ = 앞쪽 위로) / degrees (+ = tip up)'; Min = -45; Max = 45 }) }
+    '7' = @{ Key = 'stickTuning';    Default = '0'; Name = '스틱 데드존/감도 / thumbstick deadzone/curve'
+             Params = @(@{ Key = 'stickDeadzone'; Default = '0.10'; Name = '데드존 / deadzone'; Min = 0; Max = 0.5 },
+                        @{ Key = 'stickCurve'; Default = '1.0'; Name = '감도 곡선 (1 = 그대로) / curve (1 = linear)'; Min = 0.5; Max = 3.0 }) }
 }
 
 function Show([bool]$ok, [string]$text) {
@@ -125,11 +135,45 @@ function Show-Menu {
         $t = $Toggles[$k]
         $on = (Get-Setting $t.Key $t.Default) -ne '0'
         $state = if ($on) { '켜짐 / ON ' } else { '꺼짐 / OFF' }
-        Write-Host ("  {0}. [{1}]  {2}" -f $k, $state, $t.Name) -ForegroundColor $(if ($on) { 'Green' } else { 'Yellow' })
+        $values = ''
+        if ($t['Params']) { $values = '  (' + (($t['Params'] | ForEach-Object { "$($_.Key)=$(Get-Setting $_.Key $_.Default)" }) -join ', ') + ')' }
+        Write-Host ("  {0}. [{1}]  {2}{3}" -f $k, $state, $t.Name, $values) -ForegroundColor $(if ($on) { 'Green' } else { 'Yellow' })
     }
     Write-Host ''
-    Write-Host '  번호 = 켜기/끄기 전환 (게임 중에도 1초 안에 반영) / number = toggle (applies within 1 s)'
+    Write-Host '  번호 = 켜기/끄기 (값이 있는 항목은 값도 바꿀 수 있음, 게임 중에도 1초 안에 반영)'
+    Write-Host '  number = toggle / change values (applies within 1 s, even in game)'
     Write-Host '  Enter = 새로고침 / refresh,  Q = 종료 / quit'
+}
+
+function Toggle-Item($t) {
+    $on = (Get-Setting $t.Key $t.Default) -ne '0'
+    Set-Setting $t.Key $(if ($on) { '0' } else { '1' })
+}
+
+# 값이 있는 항목: 켜기/끄기 또는 값 바꾸기
+function Edit-Item($t) {
+    Write-Host ''
+    Write-Host "  $($t.Name)" -ForegroundColor Cyan
+    Write-Host '  T. 켜기/끄기 / toggle'
+    for ($i = 0; $i -lt $t['Params'].Count; $i++) {
+        $v = $t['Params'][$i]
+        Write-Host ("  {0}. {1} = {2}  ({3} ~ {4})" -f ($i + 1), $v.Name, (Get-Setting $v.Key $v.Default), $v.Min, $v.Max)
+    }
+    $sub = (Read-Host '선택 / choice').Trim().ToUpper()
+    if ($sub -eq 'T') { Toggle-Item $t; return }
+    $index = 0
+    if (-not [int]::TryParse($sub, [ref]$index) -or $index -lt 1 -or $index -gt $t['Params'].Count) { return }
+    $v = $t['Params'][$index - 1]
+    $text = (Read-Host "$($v.Name) ($($v.Min) ~ $($v.Max))").Trim()
+    $number = 0.0
+    if (-not [double]::TryParse($text, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$number) -or
+        $number -lt $v.Min -or $number -gt $v.Max) {
+        Write-Host "  범위 밖이거나 숫자가 아닙니다 / out of range" -ForegroundColor Yellow
+        Start-Sleep -Seconds 1
+        return
+    }
+    Set-Setting $v.Key $number.ToString([Globalization.CultureInfo]::InvariantCulture)
+    Set-Setting $t.Key '1'  # 값을 바꾸면 켠다
 }
 
 while ($true) {
@@ -140,7 +184,6 @@ while ($true) {
     if ($choice -eq 'Q') { break }
     if ($Toggles.Contains($choice)) {
         $t = $Toggles[$choice]
-        $on = (Get-Setting $t.Key $t.Default) -ne '0'
-        Set-Setting $t.Key $(if ($on) { '0' } else { '1' })
+        if ($t['Params']) { Edit-Item $t } else { Toggle-Item $t }
     }
 }

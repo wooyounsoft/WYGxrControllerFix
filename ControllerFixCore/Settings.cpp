@@ -37,6 +37,8 @@ const char* DEFAULT_INI =
     "; 헤드셋 모델명에 이 문자열이 있을 때만 동작 (비우면 모든 헤드셋)\n"
     "; VD는 Galaxy XR도 'Meta Quest 3'로 보고하므로 보통은 비워 둡니다\n"
     "hmdMatch=\n"
+    "; 시리얼에 이 문자열이 있는 컨트롤러는 건드리지 않음 (기본: Steam Link 컨트롤러)\n"
+    "ignoreSerial=VRLINK\n"
     "; OpenXR 레이어 (VDXR 게임): 켜기/끄기, 대상 런타임 이름 포함 문자열\n"
     "openxrEnabled=1\n"
     "runtimeMatch=VirtualDesktop\n"
@@ -53,9 +55,29 @@ const char* DEFAULT_INI =
     "releaseBoost=1\n"
     "releasePeakMs=150\n"
     "releaseHoldMs=60\n"
+    "; 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 보정 안 함 (멈췄다가 내려놓을 때 튀어 나가지 않게)\n"
+    "releaseMaxPeakAgeMs=80\n"
     "releaseMinSpeed=1.0\n"
     "gripPress=0.7\n"
-    "gripRelease=0.4\n";
+    "gripRelease=0.4\n"
+    "; SteamVR 손 위치 정확도\n"
+    "poseLagFix=1\n"
+    "poseLagMs=37\n"
+    "; 실험용: 손 포즈를 이만큼(ms) 앞당김 (0 = 끔)\n"
+    "poseLeadMs=0\n"
+    "; 실험용: 각속도 출력 기준 world (기본) / local\n"
+    "angularOutput=world\n"
+    "; 진동 강화: 세기 배율, 최소 길이(ms)\n"
+    "hapticBoost=0\n"
+    "hapticGain=1.5\n"
+    "hapticMinMs=20\n"
+    "; 컨트롤러 각도 조정 (도, + = 앞쪽을 위로)\n"
+    "angleOffset=0\n"
+    "angleOffsetDeg=0\n"
+    "; 스틱: 데드존(0~0.5), 감도 곡선(1 = 그대로, 클수록 가운데 근처가 덜 민감)\n"
+    "stickTuning=0\n"
+    "stickDeadzone=0.10\n"
+    "stickCurve=1.0\n";
 
 std::string trim(const std::string& s) {
     const char* ws = " \t\r\n";
@@ -108,6 +130,7 @@ void SettingsFile::parse(std::istream& in, Settings& s) {
             else if (key == "outlierResidual") s.estimator.outlierResidual = std::stod(val);
             else if (key == "modelMatch") s.modelMatch = val;
             else if (key == "hmdMatch") s.hmdMatch = val;
+            else if (key == "ignoreSerial") s.ignoreSerial = val;
             else if (key == "runtimeMatch") s.runtimeMatch = val;
             else if (key == "openxrEnabled") s.openxrEnabled = std::stoi(val) != 0;
             else if (key == "vdDump") s.vdDump = std::stoi(val) != 0;
@@ -120,11 +143,24 @@ void SettingsFile::parse(std::istream& in, Settings& s) {
             else if (key == "releaseBoost") s.releaseBoost.enabled = std::stoi(val) != 0;
             else if (key == "releasePeakMs") s.releaseBoost.peakWindowSec = std::stod(val) / MS_PER_SEC;
             else if (key == "releaseHoldMs") s.releaseBoost.holdSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "releaseMaxPeakAgeMs") s.releaseBoost.maxPeakAgeSec = std::stod(val) / MS_PER_SEC;
             else if (key == "releaseMinSpeed") s.releaseBoost.minSpeed = std::stod(val);
             else if (key == "gripPress") s.releaseBoost.gripPress = std::stod(val);
             else if (key == "vdFrameFix") s.vdFix.mode = val == "auto" ? VdFixMode::Auto : (std::stoi(val) != 0 ? VdFixMode::On : VdFixMode::Off);
             else if (key == "vdFramePitchDeg") s.vdFix.pitchDeg = std::stod(val);
             else if (key == "gripRelease") s.releaseBoost.gripRelease = std::stod(val);
+            else if (key == "poseLagFix") s.poseLagFix = std::stoi(val) != 0;
+            else if (key == "poseLagMs") s.poseLagSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "poseLeadMs") s.poseLeadSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "angularOutput") s.angularOutputWorld = val != "local";
+            else if (key == "hapticBoost") s.haptic.enabled = std::stoi(val) != 0;
+            else if (key == "hapticGain") s.haptic.gain = std::stod(val);
+            else if (key == "hapticMinMs") s.haptic.minDurationSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "angleOffset") s.angleOffset.enabled = std::stoi(val) != 0;
+            else if (key == "angleOffsetDeg") s.angleOffset.pitchDeg = std::stod(val);
+            else if (key == "stickTuning") s.stick.enabled = std::stoi(val) != 0;
+            else if (key == "stickDeadzone") s.stick.deadzone = std::stod(val);
+            else if (key == "stickCurve") s.stick.curve = std::stod(val);
         } catch (...) {
             // 잘못된 값은 기본값 유지
         }

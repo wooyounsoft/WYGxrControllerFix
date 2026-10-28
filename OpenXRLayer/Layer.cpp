@@ -65,8 +65,10 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateSession(XrInstance instance, const 
     if (!d) return XR_ERROR_HANDLE_INVALID;
     XrResult r = d->createSession(instance, info, session);
     if (XR_SUCCEEDED(r)) {
-        std::lock_guard lock(g_mapMutex);
-        g_sessions[*session] = d;
+        {
+            std::lock_guard lock(g_mapMutex);
+            g_sessions[*session] = d;
+        }
     }
     return r;
 }
@@ -101,7 +103,7 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateActionSpace(XrSession session, cons
             g_spaces[*space] = d;
         }
         if (d->active && info)
-            SpaceVelocityFixer::I().onActionSpaceCreated(*space, info->action,
+            SpaceVelocityFixer::I().onActionSpaceCreated(*space, session, info->action,
                                                          SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)));
     }
     return r;
@@ -189,6 +191,24 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateBoolean(XrSession session, 
     return r;
 }
 
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateVector2f(XrSession session, const XrActionStateGetInfo* info, XrActionStateVector2f* state) {
+    InstanceDispatch* d = bySession(session);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    XrResult r = d->getActionStateVector2f(session, info, state);
+    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive) SpaceVelocityFixer::I().onStickState(info->action, state->currentState);
+    return r;
+}
+
+// 진동 강화: 앱의 구조체는 건드리지 않고 복사본을 조정해서 넘긴다
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrApplyHapticFeedback(XrSession session, const XrHapticActionInfo* info, const XrHapticBaseHeader* haptic) {
+    InstanceDispatch* d = bySession(session);
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    if (!d->active || !haptic || haptic->type != XR_TYPE_HAPTIC_VIBRATION) return d->applyHapticFeedback(session, info, haptic);
+    XrHapticVibration vibration = *reinterpret_cast<const XrHapticVibration*>(haptic);
+    SpaceVelocityFixer::I().tuneHaptic(vibration);
+    return d->applyHapticFeedback(session, info, reinterpret_cast<const XrHapticBaseHeader*>(&vibration));
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetInstanceProcAddr(XrInstance instance, const char* name, PFN_xrVoidFunction* function);
 
 // 다음 레이어/런타임 함수를 얻어서, 있으면 우리 함수로 바꿔 돌려준다.
@@ -217,6 +237,8 @@ XrResult wrapByName(InstanceDispatch& d, const char* name, PFN_xrVoidFunction* f
         return wrap(d, name, function, d.suggestInteractionProfileBindings, &Layer_xrSuggestInteractionProfileBindings);
     if (std::strcmp(name, "xrGetActionStateFloat") == 0) return wrap(d, name, function, d.getActionStateFloat, &Layer_xrGetActionStateFloat);
     if (std::strcmp(name, "xrGetActionStateBoolean") == 0) return wrap(d, name, function, d.getActionStateBoolean, &Layer_xrGetActionStateBoolean);
+    if (std::strcmp(name, "xrGetActionStateVector2f") == 0) return wrap(d, name, function, d.getActionStateVector2f, &Layer_xrGetActionStateVector2f);
+    if (std::strcmp(name, "xrApplyHapticFeedback") == 0) return wrap(d, name, function, d.applyHapticFeedback, &Layer_xrApplyHapticFeedback);
     handled = false;
     return XR_ERROR_FUNCTION_UNSUPPORTED;
 }
@@ -265,7 +287,8 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateApiLayerInstance(const XrInstanceCr
     // 로더가 이후 xrGetInstanceProcAddr 로 다시 요청하지만, 직접 호출 경로 대비 미리 채움
     const char* hooked[] = {"xrDestroyInstance", "xrCreateSession", "xrDestroySession", "xrCreateReferenceSpace",
                             "xrCreateActionSpace", "xrDestroySpace", "xrLocateSpace",
-                            "xrSuggestInteractionProfileBindings", "xrGetActionStateFloat", "xrGetActionStateBoolean"};
+                            "xrSuggestInteractionProfileBindings", "xrGetActionStateFloat", "xrGetActionStateBoolean",
+                            "xrGetActionStateVector2f", "xrApplyHapticFeedback"};
     for (const char* name : hooked) {
         PFN_xrVoidFunction fn = nullptr;
         bool handled = false;

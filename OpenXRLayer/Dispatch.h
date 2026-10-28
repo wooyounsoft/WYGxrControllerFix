@@ -25,6 +25,8 @@ struct InstanceDispatch {
     PFN_xrSuggestInteractionProfileBindings suggestInteractionProfileBindings = nullptr;
     PFN_xrGetActionStateFloat getActionStateFloat = nullptr;
     PFN_xrGetActionStateBoolean getActionStateBoolean = nullptr;
+    PFN_xrGetActionStateVector2f getActionStateVector2f = nullptr;
+    PFN_xrApplyHapticFeedback applyHapticFeedback = nullptr;
     // 가로채지 않고 레이어가 직접 쓰는 함수
     PFN_xrPathToString pathToString = nullptr;
 

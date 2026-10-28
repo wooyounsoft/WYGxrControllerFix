@@ -12,6 +12,7 @@ namespace {
 
 constexpr int VTABLE_GET_GENERIC_INTERFACE = 0;    // IVRDriverContext
 constexpr int VTABLE_TRACKED_DEVICE_POSE_UPDATED = 1;  // IVRServerDriverHost_005/006
+constexpr int VTABLE_POLL_NEXT_EVENT = 5;              // IVRServerDriverHost_005/006 (진동 이벤트)
 constexpr const char* HOST_005 = "IVRServerDriverHost_005";
 constexpr const char* HOST_006 = "IVRServerDriverHost_006";
 // driver_oculus 는 IVRDriverInput_005, VD 는 _004/_005 를 쓴다. 버전마다 구현 함수가 다를 수 있어 따로 훅한다.
@@ -39,10 +40,13 @@ InputOriginals g_input[INPUT_VERSION_COUNT];
 
 using GetGenericInterfaceFn = void* (*)(vr::IVRDriverContext*, const char*, vr::EVRInitError*);
 using PoseUpdatedFn = void (*)(void*, uint32_t, const vr::DriverPose_t&, uint32_t);
+using PollNextEventFn = bool (*)(void*, vr::VREvent_t*, uint32_t);
 
 GetGenericInterfaceFn g_origGetGenericInterface = nullptr;
 PoseUpdatedFn g_origPoseUpdated005 = nullptr;
 PoseUpdatedFn g_origPoseUpdated006 = nullptr;
+PollNextEventFn g_origPollNextEvent005 = nullptr;
+PollNextEventFn g_origPollNextEvent006 = nullptr;
 bool g_minHookInitialized = false;
 
 void* vtableEntry(void* object, int index) {
@@ -79,13 +83,32 @@ void detourPoseUpdated006(void* self, uint32_t index, const vr::DriverPose_t& po
     detourPoseUpdated(g_origPoseUpdated006, self, index, pose, size);
 }
 
+// 드라이버가 받아 가는 이벤트 중 진동 이벤트를 조정한다 (진동 강화)
+bool detourPollNextEvent(PollNextEventFn original, void* self, vr::VREvent_t* event, uint32_t size) {
+    bool got = original(self, event, size);
+    if (got && event && size >= sizeof(vr::VREvent_t)) PoseFixer::I().onDriverEvent(*event);
+    return got;
+}
+
+bool detourPollNextEvent005(void* self, vr::VREvent_t* event, uint32_t size) {
+    return detourPollNextEvent(g_origPollNextEvent005, self, event, size);
+}
+
+bool detourPollNextEvent006(void* self, vr::VREvent_t* event, uint32_t size) {
+    return detourPollNextEvent(g_origPollNextEvent006, self, event, size);
+}
+
 void hookHost(void* host, const char* version) {
     if (!host) return;
-    void* target = vtableEntry(host, VTABLE_TRACKED_DEVICE_POSE_UPDATED);
-    if (std::strcmp(version, HOST_006) == 0)
-        hookFunction(target, reinterpret_cast<void*>(&detourPoseUpdated006), &g_origPoseUpdated006, "IVRServerDriverHost_006::TrackedDevicePoseUpdated");
-    else
-        hookFunction(target, reinterpret_cast<void*>(&detourPoseUpdated005), &g_origPoseUpdated005, "IVRServerDriverHost_005::TrackedDevicePoseUpdated");
+    void* pose = vtableEntry(host, VTABLE_TRACKED_DEVICE_POSE_UPDATED);
+    void* poll = vtableEntry(host, VTABLE_POLL_NEXT_EVENT);
+    if (std::strcmp(version, HOST_006) == 0) {
+        hookFunction(pose, reinterpret_cast<void*>(&detourPoseUpdated006), &g_origPoseUpdated006, "IVRServerDriverHost_006::TrackedDevicePoseUpdated");
+        hookFunction(poll, reinterpret_cast<void*>(&detourPollNextEvent006), &g_origPollNextEvent006, "IVRServerDriverHost_006::PollNextEvent");
+    } else {
+        hookFunction(pose, reinterpret_cast<void*>(&detourPoseUpdated005), &g_origPoseUpdated005, "IVRServerDriverHost_005::TrackedDevicePoseUpdated");
+        hookFunction(poll, reinterpret_cast<void*>(&detourPollNextEvent005), &g_origPollNextEvent005, "IVRServerDriverHost_005::PollNextEvent");
+    }
 }
 
 template <int V>
@@ -112,7 +135,7 @@ vr::EVRInputError detourCreateScalar(void* self, vr::PropertyContainerHandle_t c
 
 template <int V>
 vr::EVRInputError detourUpdateScalar(void* self, vr::VRInputComponentHandle_t handle, float value, double timeOffset) {
-    PoseFixer::I().onScalarUpdated(handle, value, timeOffset);
+    value = PoseFixer::I().onScalarUpdated(handle, value, timeOffset);  // 스틱 축이면 데드존/감도 조정
     return g_input[V].updateScalar(self, handle, value, timeOffset);
 }
 

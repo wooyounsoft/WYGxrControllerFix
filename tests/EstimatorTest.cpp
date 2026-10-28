@@ -4,6 +4,7 @@
 
 #include "QuatMath.h"
 #include "ReleaseBoost.h"
+#include "ControllerTuning.h"
 #include "VdFrameFit.h"
 #include "VdFrameFix.h"
 #include "VelocityEstimator.h"
@@ -147,7 +148,7 @@ void testReleaseBoostUsesPeak() {
     boost.updateGrip(0.0, GRIP_HELD, ev);
     double t = 0;
     for (; t < 0.10; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(PEAK_THROW_SPEED));
-    for (; t < 0.10 + cfg.peakWindowSec / 2; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(LATE_RELEASE_SPEED));
+    for (; t < 0.10 + cfg.maxPeakAgeSec / 2; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(LATE_RELEASE_SPEED));
     bool fired = boost.updateGrip(t, GRIP_OPEN, ev);
     VelocityEstimate out;
     bool held = boost.override(t + cfg.holdSec / 2, out);
@@ -165,6 +166,21 @@ void testReleaseBoostIgnoresOldPeakAndSlowMoves() {
     for (; t < 0.10; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(PEAK_THROW_SPEED));
     for (; t < 0.10 + cfg.peakWindowSec * 2; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(LATE_RELEASE_SPEED));
     check(!boost.updateGrip(t, GRIP_OPEN, ev), "peak older than window ignored (just placing)", ev.peakSpeed, LATE_RELEASE_SPEED);
+}
+
+// 휘두른 뒤 멈췄다가 내려놓기: 최고 속도가 창 안에 있어도 오래됐으면 보정 안 함
+void testReleaseBoostIgnoresStalePeak() {
+    constexpr double STALE_GAP_SEC = 0.120;
+    ReleaseBoost boost;
+    ReleaseBoostConfig cfg;
+    boost.setConfig(cfg);
+    ReleaseEvent ev;
+    boost.updateGrip(0.0, GRIP_HELD, ev);
+    double t = 0;
+    for (; t < 0.03; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(PEAK_THROW_SPEED));
+    for (; t < 0.03 + STALE_GAP_SEC; t += SAMPLE_INTERVAL_SEC) boost.addVelocity(t, linearVelocity(LATE_RELEASE_SPEED));
+    bool fired = boost.updateGrip(t, GRIP_OPEN, ev);
+    check(!fired && ev.peakAgeSec > cfg.maxPeakAgeSec, "stale peak ignored (stop then place)", ev.peakAgeSec, cfg.maxPeakAgeSec);
 }
 
 // v_rep = Q·Rᵀ·v (Q = X축 -13°) → vdLocalToWorld 로 world 속도 복원
@@ -290,6 +306,66 @@ void testVdFrameFitLargeOffsetNeverNormal() {
     check(!everNormal && fit.verdict() == VdFrameFit::Verdict::Fix, "frame fit: large offset never 'not needed'", fit.fitErrorDeg(), fit.rawErrorDeg());
 }
 
+double dist3(const Vec3& a, const Vec3& b) { return length3(a.x - b.x, a.y - b.y, a.z - b.z); }
+
+void testStickAndHaptic() {
+    StickConfig stick;
+    stick.enabled = true;
+    stick.deadzone = 0.2;
+    stick.curve = 2.0;
+    Vec2 small = shapeStick(stick, {0.1, 0.1});
+    Vec2 full = shapeStick(stick, {0, 1});
+    Vec2 half = shapeStick(stick, {0.6, 0});  // (0.6-0.2)/0.8 = 0.5 → 0.25
+    check(small.x == 0 && small.y == 0 && std::fabs(full.y - 1) < 1e-9 && std::fabs(half.x - 0.25) < 1e-9, "stick: deadzone + curve", half.x, 0.25);
+    stick.enabled = false;
+    Vec2 same = shapeStick(stick, {0.1, 0.1});
+    check(same.x == 0.1 && same.y == 0.1, "stick: off = unchanged", same.x, 0.1);
+
+    HapticConfig haptic;
+    haptic.enabled = true;
+    double amplitude = 0.8, duration = 0.005, minimal = -1;
+    tuneHaptic(haptic, amplitude, duration);
+    tuneHaptic(haptic, amplitude, minimal);
+    check(amplitude == 1.0 && std::fabs(duration - HapticConfig::DEFAULT_MIN_DURATION_SEC) < 1e-12 && minimal == -1,
+          "haptic: gain clamp + min duration", amplitude, 1.0);
+}
+
+// 손 위치: 원래 속도로 되돌린 포즈 → 보정 속도로 되돌린 포즈
+void testPoseLag() {
+    constexpr double LAG = 0.037;
+    Vec3 shm{0.1, 1.2, -0.3};
+    Quat shmRot = multiply(yawQuat(0.4), Quat{std::cos(0.2), std::sin(0.2), 0, 0});
+    Vec3 wrongV{1.0, -2.0, 0.5}, trueV{2.5, 0.3, -1.0};
+    Vec3 wrongW{3.0, 1.0, -2.0}, trueW{-1.0, 4.0, 0.5};
+    auto expRot = [](const Vec3& r) {
+        double a = length3(r.x, r.y, r.z);
+        double s = std::sin(a / 2) / a;
+        return Quat{std::cos(a / 2), r.x * s, r.y * s, r.z * s};
+    };
+    // VD 쪽: p = shm - lag·v_wrong, R = exp(-lag·ω_wrong)·R_shm
+    Vec3 p{shm.x - LAG * wrongV.x, shm.y - LAG * wrongV.y, shm.z - LAG * wrongV.z};
+    Quat r = multiply(expRot({-LAG * wrongW.x, -LAG * wrongW.y, -LAG * wrongW.z}), shmRot);
+    correctPoseLag(LAG, wrongV, trueV, wrongW, trueW, p, r);
+    Vec3 expectedP{shm.x - LAG * trueV.x, shm.y - LAG * trueV.y, shm.z - LAG * trueV.z};
+    Quat expectedR = multiply(expRot({-LAG * trueW.x, -LAG * trueW.y, -LAG * trueW.z}), shmRot);
+    double rotErr = std::fabs(std::fabs(r.w * expectedR.w + r.x * expectedR.x + r.y * expectedR.y + r.z * expectedR.z) - 1);
+    check(dist3(p, expectedP) < 1e-12 && rotErr < 1e-12, "pose lag: corrected to true velocities", dist3(p, expectedP), 0);
+}
+
+// 앞당기기 = 같은 lag 로 되돌린 포즈를 정확히 원래대로 복원
+void testPoseLead() {
+    constexpr double LEAD = 0.025;
+    Vec3 p0{0.1, 1.2, -0.3};
+    Quat r0 = multiply(yawQuat(0.4), Quat{std::cos(0.2), std::sin(0.2), 0, 0});
+    Vec3 v{2.5, 0.3, -1.0}, w{-1.0, 4.0, 0.5};
+    Vec3 p = p0;
+    Quat r = r0;
+    correctPoseLag(LEAD, {}, v, {}, w, p, r);  // lag 만큼 되돌림
+    leadPose(LEAD, v, w, p, r);
+    double rotErr = std::fabs(std::fabs(r.w * r0.w + r.x * r0.x + r.y * r0.y + r.z * r0.z) - 1);
+    check(dist3(p, p0) < 1e-12 && rotErr < 1e-12, "pose lead: undoes same lag", dist3(p, p0), 0);
+}
+
 void testVdFrameFit() {
     testVdFrameFitLargeOffsetNeverNormal();
     VdFrameFit gxr(FIT_PRIOR_PITCH_DEG), normal(FIT_PRIOR_PITCH_DEG);
@@ -313,8 +389,12 @@ int main() {
     testVdFrameDetector();
     testVdFrameDetectorSticky();
     testVdFrameFit();
+    testStickAndHaptic();
+    testPoseLag();
+    testPoseLead();
     testReleaseBoostUsesPeak();
     testReleaseBoostIgnoresOldPeakAndSlowMoves();
+    testReleaseBoostIgnoresStalePeak();
     testSpikeRejected();
     testFreezeAndReacquire();
     testCircularMotion(AngularFrame::World);
