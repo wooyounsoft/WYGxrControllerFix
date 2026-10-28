@@ -45,6 +45,11 @@ In VDXR games the effect depends on the game: games that calculate throws from h
 themselves already work and are not changed.
 Lighthouse controllers (e.g. GripVR) are not touched.
 
+**Steam Link users**: if you also installed the Galaxy XR driver for Steam Link
+(GalaxyXR-Driver / Galaxy XR Companion, `GalaxyXRNative`), turn it off while playing through
+Virtual Desktop (SteamVR Settings → Startup/Shutdown → Manage Add-ons). It also hooks into
+Virtual Desktop sessions, and throws can feel off. Turn it back on for Steam Link.
+
 ## Build
 
 Requires Visual Studio 2022 and CMake 3.20+.

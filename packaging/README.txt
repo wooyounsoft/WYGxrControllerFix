@@ -63,6 +63,9 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 - 게임마다 던지기 처리 방식이 달라서, 라이트하우스 컨트롤러로도 던지기가
   어색한 게임이 있습니다 (예: Battle Sister). 비교는 Half-Life: Alyx 처럼
   던지기가 잘 만들어진 게임에서 해 주세요.
+- Steam Link용 Galaxy XR 드라이버(GalaxyXR-Driver, GalaxyXRNative)를 설치했다면
+  Virtual Desktop으로 할 때는 꺼 주세요 (SteamVR 설정 → 시작/종료 → 애드온 관리).
+  VD 세션에도 개입해서 던지기가 어색해질 수 있습니다. Steam Link으로 할 때 다시 켜면 됩니다.
 
 [문제 해결 / 피드백]
 - manager.bat (관리 도구): 설치 상태, 마지막 게임에서 보정이 켜졌는지 보여 주고,
@@ -88,6 +91,9 @@ and optional tuning (off by default): stronger haptics, controller angle,
 thumbstick deadzone/curve. Turn each on/off in manager.bat.
 Auto-detection: the fix turns itself off on devices that don't need it
 (Quest via VD, Steam Link). Lighthouse controllers are not touched.
+If you also use the Galaxy XR driver for Steam Link (GalaxyXR-Driver, GalaxyXRNative),
+turn it off while playing through Virtual Desktop (SteamVR Settings > Startup/Shutdown >
+Manage Add-ons); it also hooks into VD sessions and throws can feel off.
 Install: close SteamVR, extract to a permanent folder, run install.bat
 (registers the SteamVR add-on and the VDXR layer for the current user).
 Uninstall: close SteamVR, run uninstall.bat, delete the folder.
