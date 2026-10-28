@@ -64,6 +64,24 @@ function LastVerdicts([string[]]$lines) {
     return $last.Values
 }
 
+function Show-VelocityUse([string[]]$lines) {
+    # 레이어는 30초마다 stats 줄을 남긴다. 게임이 속도를 한 번도 요청하지 않았으면 손 위치로 직접 계산하는 게임.
+    # 직접 계산하는 게임이면 $true (보정 판정이 나지 않는 게 정상)
+    $stats = $lines | Where-Object { $_ -match 'locates=(\d+) velocityRequested=(\d+)' } | Select-Object -Last 1
+    if (-not $stats -or -not ($stats -match 'locates=(\d+) velocityRequested=(\d+)') -or [int64]$Matches[1] -eq 0) {
+        Write-Host '        던지기 방식: 아직 모름 (30초 이상 플레이 후 확인) / throw method: unknown yet (play 30 s+)'
+        return $false
+    }
+    if ([int64]$Matches[2] -eq 0) {
+        Write-Host '        던지기 방식: 손 위치로 직접 계산 → 원래도 잘 되는 게임, 보정 영향 없음' -ForegroundColor Green
+        Write-Host '                     throw method: computed from hand movement -> works anyway, fix not involved'
+        return $true
+    }
+    Write-Host '        던지기 방식: 런타임 속도 사용 → 보정이 적용되는 게임' -ForegroundColor Yellow
+    Write-Host '                     throw method: uses runtime velocity -> the fix applies to this game'
+    return $false
+}
+
 function Show-Status {
     Write-Host ''
     Write-Host 'WYGxrControllerFix 관리 / manager' -ForegroundColor Cyan
@@ -117,8 +135,9 @@ function Show-Status {
             Write-Host '  마지막 VDXR 게임 / last VDXR game:'
             Write-Host "        $($lines[$start])"
             $verdicts = LastVerdicts $lines[$start..($lines.Count - 1)]
+            $selfComputed = Show-VelocityUse $lines[$start..($lines.Count - 1)]
             if ($verdicts) { foreach ($v in $verdicts) { Write-Host "        $v" } }
-            else { Write-Host '        아직 판정 전 (컨트롤러를 몇 번 휘둘러 보세요) / not decided yet' }
+            elseif (-not $selfComputed) { Write-Host '        아직 판정 전 (컨트롤러를 몇 번 휘둘러 보세요) / not decided yet' }
         }
     } else {
         Write-Host '  아직 VDXR 게임 실행 기록이 없습니다 / no VDXR game run yet'
