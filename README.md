@@ -49,6 +49,8 @@ Lighthouse controllers (e.g. GripVR) are not touched.
 (GalaxyXR-Driver / Galaxy XR Companion, `GalaxyXRNative`), turn it off while playing through
 Virtual Desktop (SteamVR Settings → Startup/Shutdown → Manage Add-ons). It also hooks into
 Virtual Desktop sessions, and throws can feel off. Turn it back on for Steam Link.
+`galaxyxr_driver_mode.bat` (in the zip, or [download it alone](packaging/galaxyxr_driver_mode.bat))
+does this for you: it closes SteamVR and switches between VD mode (driver off) and Steam Link mode (driver on).
 
 ## Build
 
@@ -85,3 +87,5 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 **Steam Link도 쓰는 분**: Steam Link용 Galaxy XR 드라이버(GalaxyXR-Driver / Galaxy XR Companion, `GalaxyXRNative`)를
 설치했다면, Virtual Desktop으로 할 때는 꺼 주세요 (SteamVR 설정 → 시작/종료 → 애드온 관리).
 Virtual Desktop 세션에도 개입해서 던지기가 어색해질 수 있습니다. Steam Link으로 할 때 다시 켜면 됩니다.
+`galaxyxr_driver_mode.bat` (zip 안에 있음, [따로 받기](packaging/galaxyxr_driver_mode.bat))을 실행하면
+SteamVR을 종료하고 VD 모드(드라이버 끔) / Steam Link 모드(드라이버 켬)를 바로 바꿔 줍니다.

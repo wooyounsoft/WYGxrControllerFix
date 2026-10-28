@@ -1,0 +1,2 @@
+# cmd.exe misreads LF-only batch files with embedded PowerShell; keep CRLF as-is
+packaging/galaxyxr_driver_mode.bat -text

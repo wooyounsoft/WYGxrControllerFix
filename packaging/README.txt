@@ -66,6 +66,7 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 - Steam Link용 Galaxy XR 드라이버(GalaxyXR-Driver, GalaxyXRNative)를 설치했다면
   Virtual Desktop으로 할 때는 꺼 주세요 (SteamVR 설정 → 시작/종료 → 애드온 관리).
   VD 세션에도 개입해서 던지기가 어색해질 수 있습니다. Steam Link으로 할 때 다시 켜면 됩니다.
+  galaxyxr_driver_mode.bat 을 실행하면 SteamVR 을 종료하고 VD 모드(끔) / Steam Link 모드(켬)를 바꿔 줍니다.
 
 [문제 해결 / 피드백]
 - manager.bat (관리 도구): 설치 상태, 마지막 게임에서 보정이 켜졌는지 보여 주고,
@@ -94,6 +95,7 @@ Auto-detection: the fix turns itself off on devices that don't need it
 If you also use the Galaxy XR driver for Steam Link (GalaxyXR-Driver, GalaxyXRNative),
 turn it off while playing through Virtual Desktop (SteamVR Settings > Startup/Shutdown >
 Manage Add-ons); it also hooks into VD sessions and throws can feel off.
+galaxyxr_driver_mode.bat switches it for you (VD mode = off, Steam Link mode = on).
 Install: close SteamVR, extract to a permanent folder, run install.bat
 (registers the SteamVR add-on and the VDXR layer for the current user).
 Uninstall: close SteamVR, run uninstall.bat, delete the folder.
