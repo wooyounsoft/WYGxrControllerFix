@@ -23,7 +23,7 @@
 class SpaceVelocityFixer {
 public:
     enum class Hand { Unknown, Left, Right };
-    enum class BindingKind { Other, Grip, Stick };
+    enum class BindingKind { Other, Grip, Trigger, Stick, StickClick, Haptic };
 
     static SpaceVelocityFixer& I();
 
@@ -37,8 +37,14 @@ public:
     void onSpaceDestroyed(XrSpace space);
     // 앱이 읽은 버튼 값 (그립 해제 감지)
     void onActionState(XrAction action, Hand hand, double value);
+    // 게임의 D-pad 입력(dpad_up 등)을 기록한다
+    void onActionCreated(XrAction action, const std::string& name);
+    // D-pad 동작 중이고 게임의 D-pad 입력이면 true + 눌림 값
+    bool dpadActionState(XrAction action, bool& pressed);
+    void setDpadAllowed(bool allowed);  // UEVR 은 자체 D-pad 를 쓰므로 끈다
+    void onSessionDestroyed(XrSession session);
     // 스틱 액션이면 데드존/감도 조정
-    void onStickState(XrAction action, XrVector2f& value);
+    void onStickState(XrAction action, Hand hand, XrVector2f& value);
     // 진동 세기/길이 조정
     void tuneHaptic(XrHapticVibration& vibration);
 
@@ -65,6 +71,10 @@ private:
         controllerfix::VdFrameFit::Verdict loggedVerdict = controllerfix::VdFrameFit::Verdict::Undecided;
         controllerfix::ReleaseBoost releaseBoost;
         double lastSampleSec = 0;
+        controllerfix::SpikeGuard spikeGuard;
+        XrVector3f lastLinear{};   // 튐 구간에 대신 내보낼 마지막 보정 결과
+        XrVector3f lastAngular{};
+        bool hasLastOutput = false;
     };
 
     SpaceVelocityFixer();
@@ -74,6 +84,10 @@ private:
     void capture(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time);
     void closeCapture();
     Hand resolveHand(XrAction action, Hand hand) const;
+    bool dpadActive() const { return m_settings.enabled && m_settings.dpad.enabled && m_dpadAllowed; }
+    void setDpadHeld(bool held);
+    void pulseDpadHaptic(InstanceDispatch& dispatch, XrSpace space);
+    void updateDpadGesture(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time, const controllerfix::Vec3& hand);
     Hand spaceHand(XrSpace space) const;
     void logVerdict(XrSpace space, PairState& ps);
     controllerfix::Vec3 fixVelocity(PairState& ps, const controllerfix::Quat& rotation, const controllerfix::Vec3& reported) const;
@@ -85,6 +99,13 @@ private:
     controllerfix::SettingsFile m_settingsFile;
     controllerfix::Settings m_settings;
     std::string m_appName;
+    bool m_dpadHeld = false;  // 이 동안 왼쪽 스틱은 D-pad
+    bool m_dpadAllowed = true;
+    bool m_dpadHapticPending = false;
+    XrAction m_leftHapticAction = XR_NULL_HANDLE;  // 게임의 왼손 진동 액션
+    controllerfix::Vec2 m_dpadStick;
+    std::map<XrAction, int> m_dpadActions;  // 게임의 D-pad 입력 → 방향
+    std::map<XrSession, XrSpace> m_viewSpaces;  // 머리 위치 조회용 (레이어 전용)
     std::map<XrSpace, ActionSpace> m_actionSpaces;
     std::map<XrAction, std::set<Hand>> m_actionHands;
     std::map<XrAction, BindingKind> m_actionKinds;

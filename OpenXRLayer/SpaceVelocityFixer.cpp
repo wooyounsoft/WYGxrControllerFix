@@ -1,5 +1,7 @@
 #include "SpaceVelocityFixer.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -7,6 +9,7 @@
 #include "LayerLog.h"
 #include "QuatMath.h"
 #include "VdFrameFix.h"
+#include "VirtualPad.h"
 
 namespace {
 
@@ -22,7 +25,15 @@ constexpr XrSpaceVelocityFlags VELOCITY_VALID = XR_SPACE_VELOCITY_LINEAR_VALID_B
 constexpr const char* LEFT_HAND_PATH = "/user/hand/left";
 constexpr const char* RIGHT_HAND_PATH = "/user/hand/right";
 constexpr const char* SQUEEZE_PATH = "/input/squeeze";
+constexpr const char* TRIGGER_PATH = "/input/trigger";
+constexpr const char* TOUCH_SUFFIX = "/touch";
 constexpr const char* THUMBSTICK_PATH = "/input/thumbstick";
+constexpr const char* THUMBSTICK_CLICK_PATH = "/input/thumbstick/click";
+constexpr const char* HAPTIC_PATH = "/output/haptic";
+
+enum DpadDirection { DpadUp, DpadDown, DpadLeft, DpadRight };
+constexpr struct { const char* name; DpadDirection direction; } DPAD_ACTIONS[] = {
+    {"dpad_up", DpadUp}, {"dpad_down", DpadDown}, {"dpad_left", DpadLeft}, {"dpad_right", DpadRight}};
 
 // analyze_capture.py 와 같은 형식
 constexpr const char* CAPTURE_HEADER =
@@ -94,7 +105,10 @@ SpaceVelocityFixer::Hand SpaceVelocityFixer::handOf(const std::string& path) {
 
 SpaceVelocityFixer::BindingKind SpaceVelocityFixer::kindOf(const std::string& bindingPath) {
     if (bindingPath.find(SQUEEZE_PATH) != std::string::npos) return BindingKind::Grip;
-    // 2축 스틱 자체 (".../thumbstick/click" 같은 하위 경로는 제외)
+    if (bindingPath.find(TRIGGER_PATH) != std::string::npos && bindingPath.find(TOUCH_SUFFIX) == std::string::npos) return BindingKind::Trigger;
+    if (bindingPath.find(HAPTIC_PATH) != std::string::npos) return BindingKind::Haptic;
+    if (bindingPath.find(THUMBSTICK_CLICK_PATH) != std::string::npos) return BindingKind::StickClick;
+    // 2축 스틱 자체 (".../thumbstick/touch" 같은 하위 경로는 제외)
     size_t stick = bindingPath.rfind(THUMBSTICK_PATH);
     if (stick != std::string::npos && stick + std::string(THUMBSTICK_PATH).size() == bindingPath.size()) return BindingKind::Stick;
     return BindingKind::Other;
@@ -102,6 +116,7 @@ SpaceVelocityFixer::BindingKind SpaceVelocityFixer::kindOf(const std::string& bi
 
 bool SpaceVelocityFixer::onInstanceCreated(const std::string& appName, const std::string& runtimeName) {
     std::lock_guard lock(m_mutex);
+    VirtualPad::I().setLogger([](const char* message) { LayerLog("%s", message); });
     m_settingsFile.ensureExists();
     m_settingsFile.reloadIfChanged(m_settings);
     applySettings();
@@ -116,6 +131,7 @@ bool SpaceVelocityFixer::onInstanceCreated(const std::string& appName, const std
 void SpaceVelocityFixer::onBinding(XrAction action, Hand hand, BindingKind kind) {
     std::lock_guard lock(m_mutex);
     if (hand != Hand::Unknown) m_actionHands[action].insert(hand);
+    if (kind == BindingKind::Haptic && hand == Hand::Left) m_leftHapticAction = action;
     if (kind != BindingKind::Other) m_actionKinds[action] = kind;
 }
 
@@ -124,14 +140,106 @@ void SpaceVelocityFixer::onActionSpaceCreated(XrSpace space, XrSession session, 
     m_actionSpaces[space] = {session, action, hand};
 }
 
-void SpaceVelocityFixer::onStickState(XrAction action, XrVector2f& value) {
+void SpaceVelocityFixer::onStickState(XrAction action, Hand hand, XrVector2f& value) {
     std::lock_guard lock(m_mutex);
-    if (!m_settings.enabled || !m_settings.stick.enabled) return;
+    if (!m_settings.enabled) return;
     auto kind = m_actionKinds.find(action);
     if (kind == m_actionKinds.end() || kind->second != BindingKind::Stick) return;
+    if (dpadActive() && m_dpadHeld && resolveHand(action, hand) == Hand::Left) {
+        m_dpadStick = {value.x, value.y};
+        if (m_dpadActions.empty()) {  // 게임에 D-pad 입력이 없으면 Xbox 패드로
+            controllerfix::DpadState dpad = controllerfix::dpadFromStick(m_settings.dpad, m_dpadStick);
+            VirtualPad::I().setDpad(dpad.up, dpad.down, dpad.left, dpad.right);
+        }
+        value = {0, 0};  // D-pad 로 쓰는 동안 게임에는 스틱을 놓은 것으로 보낸다
+        return;
+    }
+    if (!m_settings.stick.enabled) return;
     controllerfix::Vec2 shaped = controllerfix::shapeStick(m_settings.stick, {value.x, value.y});
     value.x = static_cast<float>(shaped.x);
     value.y = static_cast<float>(shaped.y);
+}
+
+void SpaceVelocityFixer::onActionCreated(XrAction action, const std::string& name) {
+    std::lock_guard lock(m_mutex);
+    for (const auto& entry : DPAD_ACTIONS) {
+        if (name != entry.name) continue;
+        m_dpadActions[action] = entry.direction;
+        LayerLog("game D-pad action: %s", entry.name);
+    }
+}
+
+bool SpaceVelocityFixer::dpadActionState(XrAction action, bool& pressed) {
+    std::lock_guard lock(m_mutex);
+    auto it = m_dpadActions.find(action);
+    if (it == m_dpadActions.end() || !dpadActive() || !m_dpadHeld) return false;
+    controllerfix::DpadState dpad = controllerfix::dpadFromStick(m_settings.dpad, m_dpadStick);
+    switch (it->second) {
+    case DpadUp: pressed = dpad.up; break;
+    case DpadDown: pressed = dpad.down; break;
+    case DpadLeft: pressed = dpad.left; break;
+    default: pressed = dpad.right; break;
+    }
+    return true;
+}
+
+void SpaceVelocityFixer::setDpadAllowed(bool allowed) {
+    std::lock_guard lock(m_mutex);
+    m_dpadAllowed = allowed;
+    if (!allowed) LayerLog("D-pad off: UEVR has its own");
+}
+
+void SpaceVelocityFixer::onSessionDestroyed(XrSession session) {
+    std::lock_guard lock(m_mutex);
+    m_viewSpaces.erase(session);
+}
+
+void SpaceVelocityFixer::setDpadHeld(bool held) {
+    if (held == m_dpadHeld) return;
+    m_dpadHeld = held;
+    m_dpadStick = {};
+    m_dpadHapticPending = held && m_settings.dpad.haptic;
+    if (!held) VirtualPad::I().setDpad(false, false, false, false);
+    LayerLog("D-pad %s", held ? "on" : "off");
+}
+
+// 게임의 왼손 진동 액션으로 짧게 울린다. 액션이 없는 게임은 진동 없이 넘어간다.
+void SpaceVelocityFixer::pulseDpadHaptic(InstanceDispatch& dispatch, XrSpace space) {
+    if (!m_dpadHapticPending || m_leftHapticAction == XR_NULL_HANDLE || spaceHand(space) != Hand::Left) return;
+    m_dpadHapticPending = false;
+    XrHapticVibration vibration{XR_TYPE_HAPTIC_VIBRATION};
+    vibration.duration = static_cast<XrDuration>(controllerfix::DpadConfig::HAPTIC_DURATION_SEC * NANOSECONDS_PER_SECOND);
+    vibration.frequency = static_cast<float>(controllerfix::DpadConfig::HAPTIC_FREQUENCY_HZ);
+    vibration.amplitude = static_cast<float>(controllerfix::DpadConfig::HAPTIC_AMPLITUDE);
+    XrHapticActionInfo info{XR_TYPE_HAPTIC_ACTION_INFO};
+    info.action = m_leftHapticAction;
+    XrPath leftHand = XR_NULL_PATH;
+    if (dispatch.stringToPath) dispatch.stringToPath(dispatch.instance, LEFT_HAND_PATH, &leftHand);
+    info.subactionPath = leftHand;
+    XrSession session = m_actionSpaces[space].session;
+    auto* haptic = reinterpret_cast<const XrHapticBaseHeader*>(&vibration);
+    if (XR_SUCCEEDED(dispatch.applyHapticFeedback(session, &info, haptic))) return;
+    info.subactionPath = XR_NULL_PATH;  // 손 구분 없는 액션
+    dispatch.applyHapticFeedback(session, &info, haptic);
+}
+
+void SpaceVelocityFixer::updateDpadGesture(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time,
+                                           const controllerfix::Vec3& hand) {
+    if (!dpadActive() || !m_settings.dpad.gesture || spaceHand(space) != Hand::Left) return;
+    XrSession session = m_actionSpaces[space].session;
+    auto view = m_viewSpaces.find(session);
+    if (view == m_viewSpaces.end()) {
+        XrReferenceSpaceCreateInfo info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+        info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+        info.poseInReferenceSpace.orientation.w = 1;
+        XrSpace created = XR_NULL_HANDLE;
+        if (XR_FAILED(dispatch.createReferenceSpace(session, &info, &created))) return;
+        view = m_viewSpaces.emplace(session, created).first;
+    }
+    XrSpaceLocation head{XR_TYPE_SPACE_LOCATION};
+    if (XR_FAILED(dispatch.locateSpace(view->second, baseSpace, time, &head)) || (head.locationFlags & POSE_VALID) != POSE_VALID) return;
+    double dx = hand.x - head.pose.position.x, dy = hand.y - head.pose.position.y, dz = hand.z - head.pose.position.z;
+    setDpadHeld(controllerfix::dpadGestureHeld(m_settings.dpad, m_dpadHeld, std::sqrt(dx * dx + dy * dy + dz * dz)));
 }
 
 void SpaceVelocityFixer::tuneHaptic(XrHapticVibration& vibration) {
@@ -169,7 +277,12 @@ SpaceVelocityFixer::Hand SpaceVelocityFixer::spaceHand(XrSpace space) const {
 void SpaceVelocityFixer::onActionState(XrAction action, Hand hand, double value) {
     std::lock_guard lock(m_mutex);
     auto kind = m_actionKinds.find(action);
-    if (kind == m_actionKinds.end() || kind->second != BindingKind::Grip) return;
+    if (kind != m_actionKinds.end() && kind->second == BindingKind::StickClick) {
+        if (dpadActive() && !m_settings.dpad.gesture && resolveHand(action, hand) == Hand::Right) setDpadHeld(value > 0);
+        return;
+    }
+    BindingKind wanted = m_settings.releaseBoost.button == controllerfix::ReleaseButton::Trigger ? BindingKind::Trigger : BindingKind::Grip;
+    if (kind == m_actionKinds.end() || kind->second != wanted) return;
     if (!m_settings.enabled || !m_settings.openxrEnabled) return;
     Hand resolved = resolveHand(action, hand);
     if (resolved == Hand::Unknown) return;
@@ -331,14 +444,27 @@ void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSp
 
     if ((locationFlags & POSE_VALID) != POSE_VALID) {
         ps.estimator.reset();
+        ps.hasLastOutput = false;
         return;
     }
     controllerfix::PoseSample sample;
     sample.timeSec = static_cast<double>(time) / NANOSECONDS_PER_SECOND;
+    // 추적 튐: 추정/판별/놓기 기록에 넣지 않고 마지막 보정 속도를 유지한다
+    if (velocityFlags && ps.hasLastOutput) {
+        double speed = std::sqrt(linear->x * linear->x + linear->y * linear->y + linear->z * linear->z);
+        if (ps.spikeGuard.isSpike(m_settings.spikeGuard, sample.timeSec, speed)) {
+            *linear = ps.lastLinear;
+            *angular = ps.lastAngular;
+            return;
+        }
+    }
     sample.position = toVec3(pose.position);
     sample.rotation = {pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z};
     ps.estimator.addSample(sample);
-    ps.lastSampleSec = sample.timeSec;
+    // 게임이 여러 예측 시각으로 조회하므로 마지막 조회가 아니라 가장 늦은 시각을 해제 기준으로 쓴다
+    ps.lastSampleSec = std::max(ps.lastSampleSec, sample.timeSec);
+    updateDpadGesture(dispatch, space, baseSpace, time, sample.position);
+    pulseDpadHaptic(dispatch, space);
 
     // 1. 속도 보정
     controllerfix::VelocityEstimate out;
@@ -367,5 +493,8 @@ void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSp
     assign(*linear, out.linear);
     assign(*angular, out.angular);
     *velocityFlags |= VELOCITY_VALID;
+    ps.lastLinear = *linear;
+    ps.lastAngular = *angular;
+    ps.hasLastOutput = true;
     ++m_replacedCount;
 }

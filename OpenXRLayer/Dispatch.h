@@ -17,6 +17,7 @@ struct InstanceDispatch {
     PFN_xrCreateSession createSession = nullptr;
     PFN_xrDestroySession destroySession = nullptr;
     PFN_xrCreateReferenceSpace createReferenceSpace = nullptr;
+    PFN_xrCreateAction createAction = nullptr;
     PFN_xrCreateActionSpace createActionSpace = nullptr;
     PFN_xrDestroySpace destroySpace = nullptr;
     PFN_xrLocateSpace locateSpace = nullptr;
@@ -29,6 +30,7 @@ struct InstanceDispatch {
     PFN_xrApplyHapticFeedback applyHapticFeedback = nullptr;
     // 가로채지 않고 레이어가 직접 쓰는 함수
     PFN_xrPathToString pathToString = nullptr;
+    PFN_xrStringToPath stringToPath = nullptr;
 
     std::mutex pathMutex;
     std::map<XrPath, std::string> pathNames;

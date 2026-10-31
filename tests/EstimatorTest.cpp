@@ -1,9 +1,11 @@
 // VelocityEstimator 검증: 해석적으로 속도를 아는 궤적에서 추정값 비교
 #include <cmath>
 #include <cstdio>
+#include <sstream>
 
 #include "QuatMath.h"
 #include "ReleaseBoost.h"
+#include "Settings.h"
 #include "ControllerTuning.h"
 #include "VdFrameFit.h"
 #include "VdFrameFix.h"
@@ -366,6 +368,108 @@ void testPoseLead() {
     check(dist3(p, p0) < 1e-12 && rotErr < 1e-12, "pose lead: undoes same lag", dist3(p, p0), 0);
 }
 
+// 세기 배율은 속도에만 곱해지고 손 위치/회전은 배율 1 과 같아야 한다
+void testScaleDoesNotMoveHand() {
+    constexpr double STRONG = 1.5;
+    constexpr double LAG = 0.037;
+    VdPose reported{{0.1, 1.2, -0.3}, yawQuat(0.4), {1.0, -2.0, 0.5}, {3.0, 1.0, -2.0}, {}};
+    VdPoseConfig cfg;
+    cfg.pitchDeg = cfg.angularPitchDeg = VdFrameFixConfig::DEFAULT_PITCH_DEG;
+    cfg.poseLagSec = LAG;
+    VdPose base = fixVdPose(reported, cfg);
+    cfg.linearScale = cfg.angularScale = STRONG;
+    VdPose strong = fixVdPose(reported, cfg);
+    double rotErr = std::fabs(std::fabs(base.rotation.w * strong.rotation.w + base.rotation.x * strong.rotation.x +
+                                        base.rotation.y * strong.rotation.y + base.rotation.z * strong.rotation.z) - 1);
+    check(dist3(base.position, strong.position) < 1e-12 && rotErr < 1e-12, "scale keeps hand pose", dist3(base.position, strong.position), 0);
+    check(std::fabs(strong.linear.x - base.linear.x * STRONG) < 1e-12 && std::fabs(strong.angular.y - base.angular.y * STRONG) < 1e-12,
+          "scale applies to velocity", strong.linear.x, base.linear.x * STRONG);
+}
+
+void testSpikeGuard() {
+    constexpr double FAST = 150.0, NORMAL = 5.0;
+    SpikeGuardConfig cfg;
+    SpikeGuard guard;
+    check(!guard.isSpike(cfg, 0.0, NORMAL), "spike guard: normal speed passes", 0, 0);
+    check(guard.isSpike(cfg, 0.01, FAST), "spike guard: fast frame held", 0, 0);
+    check(!guard.isSpike(cfg, 0.01 + cfg.maxHoldSec * 2, FAST), "spike guard: gives up after hold", 0, 0);
+    check(!guard.isSpike(cfg, 1.0, NORMAL) && guard.isSpike(cfg, 1.01, FAST), "spike guard: rearms after normal frame", 0, 0);
+    cfg.enabled = false;
+    SpikeGuard off;
+    check(!off.isSpike(cfg, 0.0, FAST), "spike guard: disabled", 0, 0);
+}
+
+// 최고 속도 한 프레임만 방향이 튀어도 앞뒤 평균 방향, 크기는 최고 속도
+void testReleaseDirectionAveraged() {
+    constexpr double STEP = 0.011;
+    ReleaseBoost boost;
+    ReleaseBoostConfig cfg;
+    boost.setConfig(cfg);
+    ReleaseEvent ev;
+    boost.updateGrip(0.0, GRIP_HELD, ev);
+    boost.addVelocity(STEP, linearVelocity(4.0));
+    boost.addVelocity(STEP * 2, {{5.0, 5.0, 0}, {}});  // 방향 튐, 약 7 m/s
+    boost.addVelocity(STEP * 3, linearVelocity(4.0));
+    boost.addVelocity(STEP * 4, linearVelocity(2.0));
+    bool fired = boost.updateGrip(STEP * 4, GRIP_OPEN, ev);
+    VelocityEstimate out;
+    boost.override(STEP * 4, out);
+    double speed = length3(out.linear.x, out.linear.y, out.linear.z);
+    double spikeAngle = 45.0, angle = std::atan2(out.linear.y, out.linear.x) * 180.0 / 3.14159265358979323846;
+    check(fired && angle < spikeAngle / 2, "release direction averaged", angle, 0);
+    check(std::fabs(speed - ev.peakSpeed) < 1e-9, "release keeps peak speed", speed, ev.peakSpeed);
+}
+
+void testReleaseMaxRatio() {
+    constexpr double RATIO = 1.5;
+    ReleaseBoost boost;
+    ReleaseBoostConfig cfg;
+    cfg.maxRatio = RATIO;
+    boost.setConfig(cfg);
+    ReleaseEvent ev;
+    boost.updateGrip(0.0, GRIP_HELD, ev);
+    boost.addVelocity(0.01, linearVelocity(PEAK_THROW_SPEED));
+    boost.addVelocity(0.02, linearVelocity(LATE_RELEASE_SPEED));
+    boost.updateGrip(0.02, GRIP_OPEN, ev);
+    VelocityEstimate out;
+    boost.override(0.02, out);
+    double expected = std::fmax(LATE_RELEASE_SPEED * RATIO, cfg.minSpeed);
+    check(std::fabs(length3(out.linear.x, out.linear.y, out.linear.z) - expected) < 1e-9, "release ratio limit", out.linear.x, expected);
+}
+
+void testDpad() {
+    DpadConfig cfg;
+    DpadState up = dpadFromStick(cfg, {0.1, 0.8});
+    DpadState left = dpadFromStick(cfg, {-0.9, 0});
+    DpadState idle = dpadFromStick(cfg, {0.2, -0.2});
+    check(up.up && !up.down && !up.left && !up.right, "dpad up", 0, 0);
+    check(left.left && !left.up && !left.down && !left.right, "dpad left", 0, 0);
+    check(!idle.up && !idle.down && !idle.left && !idle.right, "dpad idle below threshold", 0, 0);
+}
+
+void testDpadGesture() {
+    DpadConfig cfg;
+    check(cfg.enabled && cfg.gesture, "dpad gesture on by default", 0, 0);
+    double between = cfg.gestureDistance * (1 + DpadConfig::GESTURE_RELEASE_RATIO) / 2;
+    check(dpadGestureHeld(cfg, false, cfg.gestureDistance - 0.01), "dpad gesture: near starts", 0, 0);
+    check(!dpadGestureHeld(cfg, false, between), "dpad gesture: not started between", between, 0);
+    check(dpadGestureHeld(cfg, true, between), "dpad gesture: stays held between", between, 0);
+    check(!dpadGestureHeld(cfg, true, cfg.gestureDistance * 2), "dpad gesture: far releases", 0, 0);
+}
+
+void testSettingsParse() {
+    std::istringstream in(
+        "; comment\nenabled=0\nlinearScale = 1.25\nvdFrameFix=auto\nvdAngularPitchDeg=16\nreleaseButton=trigger\n"
+        "releaseDirWindowMs=30\nspikeMaxSpeed=abc\nspikeHoldMs=100\nunknownKey=1\ndpadTrigger=stick\ndpadGestureDist=0.3\n");
+    Settings s;
+    SettingsFile::parse(in, s);
+    check(!s.enabled && s.estimator.linearScale == 1.25 && s.vdFix.mode == VdFixMode::Auto, "settings: basic keys", s.estimator.linearScale, 1.25);
+    check(!s.dpad.gesture && s.dpad.gestureDistance == 0.3, "settings: dpad trigger", s.dpad.gestureDistance, 0.3);
+    check(s.vdFix.angularPitchDeg == 16 && s.vdFix.pitchDeg == VdFrameFixConfig::DEFAULT_PITCH_DEG, "settings: angular pitch separate", s.vdFix.angularPitchDeg, 16);
+    check(s.releaseBoost.button == ReleaseButton::Trigger && std::fabs(s.releaseBoost.directionWindowSec - 0.03) < 1e-12, "settings: release keys", s.releaseBoost.directionWindowSec, 0.03);
+    check(s.spikeGuard.maxSpeed == SpikeGuardConfig::DEFAULT_MAX_SPEED && std::fabs(s.spikeGuard.maxHoldSec - 0.1) < 1e-12, "settings: bad value keeps default", s.spikeGuard.maxSpeed, SpikeGuardConfig::DEFAULT_MAX_SPEED);
+}
+
 void testVdFrameFit() {
     testVdFrameFitLargeOffsetNeverNormal();
     VdFrameFit gxr(FIT_PRIOR_PITCH_DEG), normal(FIT_PRIOR_PITCH_DEG);
@@ -392,6 +496,13 @@ int main() {
     testStickAndHaptic();
     testPoseLag();
     testPoseLead();
+    testScaleDoesNotMoveHand();
+    testSpikeGuard();
+    testReleaseDirectionAveraged();
+    testReleaseMaxRatio();
+    testDpad();
+    testDpadGesture();
+    testSettingsParse();
     testReleaseBoostUsesPeak();
     testReleaseBoostIgnoresOldPeakAndSlowMoves();
     testReleaseBoostIgnoresStalePeak();

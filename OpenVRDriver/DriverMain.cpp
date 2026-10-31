@@ -5,6 +5,8 @@
 #include "DriverLog.h"
 #include "Hooks.h"
 #include "PoseFixer.h"
+#include "UevrDetector.h"
+#include "VirtualPad.h"
 
 namespace {
 
@@ -15,11 +17,14 @@ public:
         DriverLog("loaded");
         PoseFixer::I().initSettings();
         if (!Hooks::install(context)) return vr::VRInitError_Driver_Failed;
+        UevrDetector::I().start();
         return vr::VRInitError_None;
     }
 
     void Cleanup() override {
         Hooks::uninstall();
+        UevrDetector::I().stop();
+        VirtualPad::I().shutdown();
         DriverLog("unloaded");
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }

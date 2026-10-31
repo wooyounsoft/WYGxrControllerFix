@@ -1,4 +1,4 @@
-﻿WYGxrControllerFix v0.5.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
+﻿WYGxrControllerFix v0.6.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
 =====================================================================
 
 [무엇을 하나요]
@@ -15,7 +15,7 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
     (판별 전 처음 몇 초는 보정을 적용한 상태로 시작합니다.
      VDXR 게임은 휘두르는 동안 보정을 조금씩 더 정밀하게 다듬습니다)
   - 손 위치 정확도 (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
-  - 취향 조정 (기본 꺼짐, manager.bat 에서 켜기):
+  - 취향 조정 (기본 꺼짐, settings.ini 또는 manager.bat):
       진동 강화 / 컨트롤러 각도 조정 / 스틱 데드존과 감도
   - OpenVR Space Calibrator, 라이트하우스 컨트롤러(GripVR 등)와 함께 사용 가능
     (라이트하우스 컨트롤러에는 적용되지 않습니다)
@@ -27,6 +27,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 3. install.bat 을 실행합니다.
 4. SteamVR 게임과 VDXR 게임 모두 자동으로 적용됩니다.
    (VDXR 레이어는 현재 사용자 레지스트리에 등록되며 관리자 권한이 필요 없습니다)
+   D-pad 가상 패드용 ViGEmBus 드라이버가 없으면 포함된 설치 파일을 실행합니다.
+   이것만 관리자 권한이 필요하고, 건너뛰어도 나머지 기능은 그대로 동작합니다.
 (이전 이름 GxrThrowFix 를 설치했었다면: install.bat 이 이전 버전 등록을 자동으로 해제합니다.
  예전 폴더와 %LOCALAPPDATA%\GxrThrowFix 는 지워도 됩니다. 설정 파일 위치가
  %LOCALAPPDATA%\WYGxrControllerFix\settings.ini 로 바뀌어 새 기본값으로 시작합니다)
@@ -36,8 +38,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
 2. 폴더를 지웁니다.
 (임시로 끄기: SteamVR 설정 > 시작/종료 > 애드온 관리 에서 wygxrcontrollerfix 끄기 후 SteamVR 재시작)
 
-[설정]  manager.bat 으로 주요 항목을 켜고 끌 수 있습니다.
-       직접 고치려면 %LOCALAPPDATA%\WYGxrControllerFix\settings.ini
+[설정]  manager.bat 으로 주요 기능을 켜고 끌 수 있습니다.
+       아래 항목을 직접 고치려면 %LOCALAPPDATA%\WYGxrControllerFix\settings.ini
 게임 실행 중에 저장하면 1초 안에 반영됩니다 (재시작 불필요).
   enabled=0/1            전체 끄기/켜기 (바로 비교해 볼 수 있음)
   openxrEnabled=0/1      VDXR 게임 보정만 끄기/켜기
@@ -56,6 +58,20 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
                          힘이 아직 빠지면 200~300 / 80~100 으로 늘려 보세요.
   releaseMaxPeakAgeMs=80 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 적용 안 함
                          (휘두른 뒤 멈췄다가 내려놓을 때 물건이 튀어 나가지 않게)
+  releaseDirWindowMs=65  던지는 방향을 이 시간(ms) 평균으로 안정화 (0 = 끔)
+  releaseMaxRatio=0      놓는 순간 속도의 이 배수까지만 보정 (0 = 제한 없음)
+  releaseButton=grip     물건을 잡는 버튼 (grip | trigger). 트리거로 잡는 게임은 trigger
+  spikeGuard=0/1         추적이 순간적으로 튈 때 직전 값 유지 (기본 켜짐),
+                         spikeMaxSpeed=25 (m/s), spikeHoldMs=150
+  vdAngularPitchDeg=13   손목 회전 보정 각도
+  dpadEmulation=0/1      왼손을 얼굴 가까이 댄 채 왼쪽 스틱을 밀면 D-pad (기본 켜짐,
+                         manager.bat 에서 끄면 다음 실행에도 유지)
+                         그동안 게임에는 왼쪽 스틱을 놓은 것으로 보냅니다.
+                         게임에 D-pad 입력이 있으면 그걸 누르고, 없으면 가상 Xbox 패드로 보냅니다
+                         (ViGEmBus, 처음 쓸 때 패드가 생김). UEVR 게임에서는 자동으로 꺼집니다.
+  dpadHaptic=0/1         D-pad 에 들어갈 때 왼손 진동, VDXR 게임 (기본 켜짐)
+  dpadTrigger=gesture    gesture = 왼손을 얼굴 가까이, stick = 오른쪽 스틱을 누른 채
+  dpadGestureDist=0.22   손과 머리 거리(m), dpadThreshold=0.5 스틱 민감도
 
 참고: 처음에는 던지는 힘이 이전보다 세게 느껴질 수 있습니다.
 
@@ -69,8 +85,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
   galaxyxr_driver_mode.bat 을 실행하면 SteamVR 을 종료하고 VD 모드(끔) / Steam Link 모드(켬)를 바꿔 줍니다.
 
 [문제 해결 / 피드백]
-- manager.bat (관리 도구): 설치 상태, 마지막 게임에서 보정이 켜졌는지 보여 주고,
-  보정 전체 / VDXR 게임 보정 / 놓을 때 속도 보정을 번호로 켜고 끕니다 (게임 중에도 1초 안에 반영).
+- manager.bat (관리 도구): 기능을 번호로 켜고 끕니다 (게임 중에도 1초 안에 반영, 설정은 유지).
+  S 를 누르면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 줍니다.
   마지막 VDXR 게임의 던지기 방식도 보여 줍니다: 런타임 속도 요청(보정 적용, 실제로 쓰는지는 게임마다 다름) /
   손 움직임으로 직접 계산(원래도 잘 되는 게임, 보정 영향 없음).
 - 동작 확인 (SteamVR): C:\Program Files (x86)\Steam\logs\vrserver.txt 에서 "WYGxrControllerFix" 검색
@@ -91,7 +107,7 @@ VDXR (OpenXR) games: throws follow your hand motion in direction and strength.
 No added latency or jitter.
 Also: more accurate hand position in SteamVR games,
 and optional tuning (off by default): stronger haptics, controller angle,
-thumbstick deadzone/curve. Turn each on/off in manager.bat.
+thumbstick deadzone/curve (settings.ini; stick tuning also in manager.bat).
 Auto-detection: the fix turns itself off on devices that don't need it
 (Quest via VD, Steam Link). Lighthouse controllers are not touched.
 If you also use the Galaxy XR driver for Steam Link (GalaxyXR-Driver, GalaxyXRNative),
@@ -110,4 +126,4 @@ it also shows whether the game requests the runtime's velocity or never asks for
   after grip release; tune with releasePeakMs / releaseHoldMs).
 
 License: MIT (LICENSE.txt)
-Third-party: MinHook (BSD 2-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0) - see licenses\
+Third-party: MinHook (BSD 2-Clause), ViGEmClient (MIT), ViGEmBus installer (BSD 3-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0) - see licenses\

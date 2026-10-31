@@ -12,21 +12,18 @@ $LogTag = '[WYGxrControllerFix]'
 $FixOn = 'fix ON'
 $FixOff = 'fix OFF'
 
-# 메뉴에서 바꿀 수 있는 설정 (키, 기본값, 설명)
+# 메뉴에서 바꿀 수 있는 설정 (키, 기본값, 이름)
 # Params: 값 설정 (키, 기본값, 이름, 최소, 최대)
 $Toggles = [ordered]@{
-    '1' = @{ Key = 'enabled';        Default = '1'; Name = '보정 전체 / all fixes' }
-    '2' = @{ Key = 'openxrEnabled';  Default = '1'; Name = 'VDXR 게임 보정 / VDXR games' }
-    '3' = @{ Key = 'releaseBoost';   Default = '1'; Name = '놓을 때 속도 보정 / release boost' }
-    '4' = @{ Key = 'poseLagFix';     Default = '1'; Name = '손 위치 정확도 (SteamVR) / hand position accuracy (SteamVR)' }
-    '5' = @{ Key = 'hapticBoost';    Default = '0'; Name = '진동 강화 / stronger haptics'
-             Params = @(@{ Key = 'hapticGain'; Default = '1.5'; Name = '세기 배율 / gain'; Min = 1.0; Max = 4.0 },
-                        @{ Key = 'hapticMinMs'; Default = '20'; Name = '최소 길이 ms / min length ms'; Min = 0; Max = 100 }) }
-    '6' = @{ Key = 'angleOffset';    Default = '0'; Name = '컨트롤러 각도 조정 / controller angle'
-             Params = @(@{ Key = 'angleOffsetDeg'; Default = '0'; Name = '각도 (+ = 앞쪽 위로) / degrees (+ = tip up)'; Min = -45; Max = 45 }) }
-    '7' = @{ Key = 'stickTuning';    Default = '0'; Name = '스틱 데드존/감도 / thumbstick deadzone/curve'
-             Params = @(@{ Key = 'stickDeadzone'; Default = '0.10'; Name = '데드존 / deadzone'; Min = 0; Max = 0.5 },
-                        @{ Key = 'stickCurve'; Default = '1.0'; Name = '감도 곡선 (1 = 그대로) / curve (1 = linear)'; Min = 0.5; Max = 3.0 }) }
+    '1'  = @{ Key = 'enabled';       Default = '1'; Name = '전체 보정 / all fixes' }
+    '2'  = @{ Key = 'openxrEnabled'; Default = '1'; Name = 'VDXR 게임 보정 / VDXR games' }
+    '3'  = @{ Key = 'releaseBoost';  Default = '1'; Name = '놓을 때 속도 보정 / release boost' }
+    '4'  = @{ Key = 'poseLagFix';    Default = '1'; Name = '손 위치 정확도 / hand position (SteamVR)' }
+    '5'  = @{ Key = 'dpadEmulation'; Default = '1'; Name = 'D-pad: 왼손을 얼굴에 대고 왼쪽 스틱 / left hand at face + left stick' }
+    '6'  = @{ Key = 'dpadHaptic';    Default = '1'; Name = 'D-pad 진동 (VDXR) / D-pad haptic (VDXR)' }
+    '7'  = @{ Key = 'stickTuning';   Default = '0'; Name = '스틱 데드존/감도 / stick deadzone/curve'
+              Params = @(@{ Key = 'stickDeadzone'; Default = '0.10'; Name = '데드존 / deadzone'; Min = 0; Max = 0.5 },
+                         @{ Key = 'stickCurve'; Default = '1.0'; Name = '감도 곡선 (1 = 그대로) / curve (1 = linear)'; Min = 0.5; Max = 3.0 }) }
 }
 
 function Show([bool]$ok, [string]$text) {
@@ -62,6 +59,22 @@ function LastVerdicts([string[]]$lines) {
         if ($line -match '(device \d+|left hand|right hand)') { $last[$Matches[1]] = $line }
     }
     return $last.Values
+}
+
+# 훅 실패나 SteamVR 업데이트로 보정이 조용히 빠진 경우를 알려 준다
+function Show-DriverHealth([string[]]$lines) {
+    $failed = @($lines | Where-Object { $_ -match 'hook .* failed|MH_Initialize failed' })
+    foreach ($f in $failed) { Show $false "훅 실패 / hook failed: $($f.Substring($f.IndexOf($LogTag) + $LogTag.Length).Trim())" }
+    if (-not ($lines | Where-Object { $_ -match 'hooked IVRServerDriverHost_\d+::TrackedDevicePoseUpdated' })) {
+        Show $false '포즈 훅이 없습니다. SteamVR 업데이트 때문일 수 있습니다 / pose hook missing (SteamVR update?)'
+        return
+    }
+    $stats = @($lines | Where-Object { $_ -match 'device \d+: replaced (\d+) poses' })
+    if ($stats.Count -eq 0) { return }
+    $verdictOff = @($lines | Where-Object { $_.Contains($FixOff) }).Count -gt 0
+    $replaced = ($stats | ForEach-Object { if ($_ -match 'replaced (\d+) poses') { [int64]$Matches[1] } } | Measure-Object -Maximum).Maximum
+    if ($replaced -eq 0 -and -not $verdictOff) { Show $false '컨트롤러에 보정이 적용되지 않았습니다 / no poses were fixed' }
+    elseif ($failed.Count -eq 0) { Show $true "포즈 처리 정상 / poses fixed: $replaced" }
 }
 
 function Show-VelocityUse([string[]]$lines) {
@@ -103,6 +116,7 @@ function Show-Status {
         for ($i = $lines.Count - 1; $i -ge 0; $i--) { if ($lines[$i].Contains("$LogTag settings:")) { $sessionStart = $i; break } }
         if ($sessionStart -gt 0) { $lines = $lines[$sessionStart..($lines.Count - 1)] }
         if ($lines) {
+            Show-DriverHealth $lines
             $verdicts = LastVerdicts $lines
             if ($verdicts) {
                 Write-Host '  마지막 SteamVR 실행 / last SteamVR session:'
@@ -149,19 +163,19 @@ function Show-Status {
 }
 
 function Show-Menu {
-    Write-Host '설정 / settings' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host 'WYGxrControllerFix' -ForegroundColor Cyan
+    Write-Host ''
     foreach ($k in $Toggles.Keys) {
         $t = $Toggles[$k]
         $on = (Get-Setting $t.Key $t.Default) -ne '0'
-        $state = if ($on) { '켜짐 / ON ' } else { '꺼짐 / OFF' }
-        $values = ''
-        if ($t['Params']) { $values = '  (' + (($t['Params'] | ForEach-Object { "$($_.Key)=$(Get-Setting $_.Key $_.Default)" }) -join ', ') + ')' }
-        Write-Host ("  {0}. [{1}]  {2}{3}" -f $k, $state, $t.Name, $values) -ForegroundColor $(if ($on) { 'Green' } else { 'Yellow' })
+        $state = if ($on) { 'ON' } else { 'OFF' }
+        Write-Host ("  {0}. [{1,-3}] {2}" -f $k, $state, $t.Name) -ForegroundColor $(if ($on) { 'Green' } else { 'DarkGray' })
     }
     Write-Host ''
-    Write-Host '  번호 = 켜기/끄기 (값이 있는 항목은 값도 바꿀 수 있음, 게임 중에도 1초 안에 반영)'
-    Write-Host '  number = toggle / change values (applies within 1 s, even in game)'
-    Write-Host '  Enter = 새로고침 / refresh,  Q = 종료 / quit'
+    Write-Host '  번호 = 켜기/끄기, 값 변경 (게임 중에도 1초 안에 반영, 설정은 유지됨)'
+    Write-Host '  number = toggle / change value (applies within 1 s, setting is kept)'
+    Write-Host '  S = 상태 / status,  Q = 종료 / quit'
 }
 
 function Toggle-Item($t) {
@@ -197,11 +211,14 @@ function Edit-Item($t) {
 
 while ($true) {
     Clear-Host
-    Show-Status
     Show-Menu
     $choice = (Read-Host '선택 / choice').Trim().ToUpper()
     if ($choice -eq 'Q') { break }
-    if ($Toggles.Contains($choice)) {
+    if ($choice -eq 'S') {
+        Clear-Host
+        Show-Status
+        [void](Read-Host 'Enter')
+    } elseif ($Toggles.Contains($choice)) {
         $t = $Toggles[$choice]
         if ($t['Params']) { Edit-Item $t } else { Toggle-Item $t }
     }

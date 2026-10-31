@@ -6,6 +6,9 @@ dist/
 # 기기 시리얼 등 개인 데이터가 들어 있는 캡처
 captures/
 
+# 패키징할 때 tools/package.ps1 이 받는 설치 파일
+third_party/vigembus/*.exe
+
 # VD 바이너리 분석 결과물 (Ghidra 프로젝트, 디컴파일 출력)
 re_work/
 

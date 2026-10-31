@@ -12,11 +12,13 @@
 #include "Dispatch.h"
 #include "LayerLog.h"
 #include "SpaceVelocityFixer.h"
+#include "VirtualPad.h"
 
 namespace {
 
 constexpr const char* LAYER_NAME = "XR_APILAYER_WY_gxr_controllerfix";
 constexpr const wchar_t* VDXR_MODULE_NAME = L"virtualdesktop-openxr.dll";
+constexpr const wchar_t* UEVR_MODULE_NAME = L"UEVRBackend.dll";
 constexpr const char* VDXR_MODULE_TAG = " [VirtualDesktop runtime dll]";  // runtimeMatch=VirtualDesktop 에 걸림
 
 // 핸들 → 인스턴스 테이블. space/session 핸들로 어느 런타임에 보낼지 찾는다.
@@ -38,7 +40,16 @@ InstanceDispatch* bySession(XrSession h) {
 InstanceDispatch* bySpace(XrSpace h) {
     std::lock_guard lock(g_mapMutex);
     auto it = g_spaces.find(h);
-    return it == g_spaces.end() ? nullptr : it->second;
+    if (it != g_spaces.end()) return it->second;
+    // 확장 기능으로 만든 space (앵커 등)는 등록돼 있지 않다 → 막지 말고 런타임으로 넘긴다
+    return g_instances.empty() ? nullptr : g_instances.begin()->second.get();
+}
+// XrActionSet 은 인스턴스 테이블이 없어서 활성 인스턴스로 보낸다 (UEVR 처럼 여럿이면 대상 런타임 쪽)
+InstanceDispatch* activeInstance() {
+    std::lock_guard lock(g_mapMutex);
+    for (auto& [handle, d] : g_instances)
+        if (d->active) return d.get();
+    return nullptr;
 }
 
 template <typename T>
@@ -51,6 +62,7 @@ const T* findInChain(const void* next, XrStructureType type) {
 XRAPI_ATTR XrResult XRAPI_CALL Layer_xrDestroyInstance(XrInstance instance) {
     InstanceDispatch* d = byInstance(instance);
     if (!d) return XR_ERROR_HANDLE_INVALID;
+    VirtualPad::I().shutdown();
     XrResult r = d->destroyInstance(instance);
     std::lock_guard lock(g_mapMutex);
     for (auto it = g_sessions.begin(); it != g_sessions.end();) it = (it->second == d) ? g_sessions.erase(it) : std::next(it);
@@ -76,6 +88,7 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateSession(XrInstance instance, const 
 XRAPI_ATTR XrResult XRAPI_CALL Layer_xrDestroySession(XrSession session) {
     InstanceDispatch* d = bySession(session);
     if (!d) return XR_ERROR_HANDLE_INVALID;
+    SpaceVelocityFixer::I().onSessionDestroyed(session);
     XrResult r = d->destroySession(session);
     std::lock_guard lock(g_mapMutex);
     g_sessions.erase(session);
@@ -90,6 +103,15 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateReferenceSpace(XrSession session, c
         std::lock_guard lock(g_mapMutex);
         g_spaces[*space] = d;
     }
+    return r;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateAction(XrActionSet actionSet, const XrActionCreateInfo* info, XrAction* action) {
+    InstanceDispatch* d = activeInstance();
+    if (!d) return XR_ERROR_HANDLE_INVALID;
+    XrResult r = d->createAction(actionSet, info, action);
+    if (XR_SUCCEEDED(r) && info && info->actionType == XR_ACTION_TYPE_BOOLEAN_INPUT)
+        SpaceVelocityFixer::I().onActionCreated(*action, info->actionName);
     return r;
 }
 
@@ -186,7 +208,16 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateBoolean(XrSession session, 
     InstanceDispatch* d = bySession(session);
     if (!d) return XR_ERROR_HANDLE_INVALID;
     XrResult r = d->getActionStateBoolean(session, info, state);
-    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive)
+    if (XR_FAILED(r) || !d->active || !info || !state) return r;
+    bool pressed = false;
+    if (SpaceVelocityFixer::I().dpadActionState(info->action, pressed)) {  // 바인딩이 없어도 게임에는 눌린 것으로 보인다
+        XrBool32 shown = pressed ? XR_TRUE : XR_FALSE;
+        state->changedSinceLastSync = shown != state->currentState ? XR_TRUE : XR_FALSE;
+        state->currentState = shown;
+        state->isActive = XR_TRUE;
+        return r;
+    }
+    if (state->isActive)
         SpaceVelocityFixer::I().onActionState(info->action, SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)), state->currentState ? 1.0 : 0.0);
     return r;
 }
@@ -195,7 +226,8 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetActionStateVector2f(XrSession session,
     InstanceDispatch* d = bySession(session);
     if (!d) return XR_ERROR_HANDLE_INVALID;
     XrResult r = d->getActionStateVector2f(session, info, state);
-    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive) SpaceVelocityFixer::I().onStickState(info->action, state->currentState);
+    if (XR_SUCCEEDED(r) && d->active && info && state && state->isActive)
+        SpaceVelocityFixer::I().onStickState(info->action, SpaceVelocityFixer::handOf(d->pathName(info->subactionPath)), state->currentState);
     return r;
 }
 
@@ -228,6 +260,7 @@ XrResult wrapByName(InstanceDispatch& d, const char* name, PFN_xrVoidFunction* f
     if (std::strcmp(name, "xrCreateSession") == 0) return wrap(d, name, function, d.createSession, &Layer_xrCreateSession);
     if (std::strcmp(name, "xrDestroySession") == 0) return wrap(d, name, function, d.destroySession, &Layer_xrDestroySession);
     if (std::strcmp(name, "xrCreateReferenceSpace") == 0) return wrap(d, name, function, d.createReferenceSpace, &Layer_xrCreateReferenceSpace);
+    if (std::strcmp(name, "xrCreateAction") == 0) return wrap(d, name, function, d.createAction, &Layer_xrCreateAction);
     if (std::strcmp(name, "xrCreateActionSpace") == 0) return wrap(d, name, function, d.createActionSpace, &Layer_xrCreateActionSpace);
     if (std::strcmp(name, "xrDestroySpace") == 0) return wrap(d, name, function, d.destroySpace, &Layer_xrDestroySpace);
     if (std::strcmp(name, "xrLocateSpace") == 0) return wrap(d, name, function, d.locateSpace, &Layer_xrLocateSpace);
@@ -252,6 +285,8 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrGetInstanceProcAddr(XrInstance instance, 
     }
     InstanceDispatch* d = byInstance(instance);
     if (!d) return g_lastNextGetInstanceProcAddr ? g_lastNextGetInstanceProcAddr(instance, name, function) : XR_ERROR_HANDLE_INVALID;
+    // 대상 런타임이 아니면 끼어들지 않는다 (정리용 xrDestroyInstance 만 유지)
+    if (!d->active && std::strcmp(name, "xrDestroyInstance") != 0) return d->getInstanceProcAddr(instance, name, function);
     bool handled = false;
     XrResult r = wrapByName(*d, name, function, handled);
     return handled ? r : d->getInstanceProcAddr(instance, name, function);
@@ -286,7 +321,7 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateApiLayerInstance(const XrInstanceCr
     d->getInstanceProcAddr = nextGipa;
     // 로더가 이후 xrGetInstanceProcAddr 로 다시 요청하지만, 직접 호출 경로 대비 미리 채움
     const char* hooked[] = {"xrDestroyInstance", "xrCreateSession", "xrDestroySession", "xrCreateReferenceSpace",
-                            "xrCreateActionSpace", "xrDestroySpace", "xrLocateSpace",
+                            "xrCreateAction", "xrCreateActionSpace", "xrDestroySpace", "xrLocateSpace",
                             "xrSuggestInteractionProfileBindings", "xrGetActionStateFloat", "xrGetActionStateBoolean",
                             "xrGetActionStateVector2f", "xrApplyHapticFeedback"};
     for (const char* name : hooked) {
@@ -295,7 +330,9 @@ XRAPI_ATTR XrResult XRAPI_CALL Layer_xrCreateApiLayerInstance(const XrInstanceCr
         wrapByName(*d, name, &fn, handled);
     }
     nextGipa(*instance, "xrPathToString", reinterpret_cast<PFN_xrVoidFunction*>(&d->pathToString));
+    nextGipa(*instance, "xrStringToPath", reinterpret_cast<PFN_xrVoidFunction*>(&d->stringToPath));
     d->active = SpaceVelocityFixer::I().onInstanceCreated(info->applicationInfo.applicationName, runtimeName(*d));
+    if (d->active) SpaceVelocityFixer::I().setDpadAllowed(GetModuleHandleW(UEVR_MODULE_NAME) == nullptr);
 
     std::lock_guard lock(g_mapMutex);
     g_instances[*instance] = std::move(d);

@@ -5,6 +5,7 @@ add_library(OpenVRDriver SHARED
     DriverMain.cpp
     Hooks.cpp
     PoseFixer.cpp
+    UevrDetector.cpp
     VdShmDump.cpp
 )
 set_target_properties(OpenVRDriver PROPERTIES
@@ -14,7 +15,7 @@ set_target_properties(OpenVRDriver PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE ${DEPLOY_DIR}/bin/win64
 )
 target_include_directories(OpenVRDriver PRIVATE ${CMAKE_SOURCE_DIR}/third_party/openvr)
-target_link_libraries(OpenVRDriver PRIVATE ControllerFixCore minhook)
+target_link_libraries(OpenVRDriver PRIVATE ControllerFixCore VirtualPad minhook)
 
 # SteamVR 드라이버 폴더 구조로 리소스 복사
 add_custom_command(TARGET OpenVRDriver POST_BUILD

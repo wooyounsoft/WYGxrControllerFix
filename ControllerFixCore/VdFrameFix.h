@@ -18,6 +18,7 @@ struct VdFrameFixConfig {
 
     VdFixMode mode = VdFixMode::Auto;
     double pitchDeg = DEFAULT_PITCH_DEG;
+    double angularPitchDeg = DEFAULT_PITCH_DEG;  // 각속도 전용 (캡처 최적값 15~16°, 오차 차이는 1° 미만)
 };
 
 // 실제 속도(포즈 변화로 추정)와 비교해서 원래 속도와 보정 속도 중 어느 쪽이 맞는지 투표로 판별한다.

@@ -6,6 +6,14 @@ $root = Split-Path $PSScriptRoot -Parent
 $name = "WYGxrControllerFix-v$Version"
 $stage = Join-Path $root "dist\$name"
 
+# 가상 패드 드라이버 설치 파일 (D-pad, install.bat 이 없을 때만 설치)
+$vigemBusFile = 'ViGEmBus_1.22.0_x64_x86_arm64.exe'
+$vigemBusUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/$vigemBusFile"
+$vigemBusSha256 = '89220A7865076B342892F98865F3499FB7C4CFD673159E89D352C360FD014C6A'
+$vigemBusPath = Join-Path $root "third_party\vigembus\$vigemBusFile"
+if (-not (Test-Path $vigemBusPath)) { Invoke-WebRequest $vigemBusUrl -OutFile $vigemBusPath -UseBasicParsing }
+if ((Get-FileHash $vigemBusPath -Algorithm SHA256).Hash -ne $vigemBusSha256) { throw 'ViGEmBus installer hash mismatch' }
+
 cmake --build (Join-Path $root 'build') --config Release
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 & (Join-Path $root 'build\Release\EstimatorTest.exe')
@@ -19,6 +27,9 @@ Get-ChildItem (Join-Path $stage 'openxr') -Exclude '*.dll', '*.json' | Remove-It
 Copy-Item (Join-Path $root 'packaging\*') $stage
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
 Copy-Item (Join-Path $root 'build\_deps\minhook-src\LICENSE.txt') (Join-Path $stage 'licenses\MinHook-LICENSE.txt')
+Copy-Item (Join-Path $root 'build\_deps\vigemclient-src\LICENSE') (Join-Path $stage 'licenses\ViGEmClient-LICENSE.txt')
+Copy-Item $vigemBusPath $stage
+Copy-Item (Join-Path $root 'third_party\vigembus\LICENSE') (Join-Path $stage 'licenses\ViGEmBus-LICENSE.txt')
 Copy-Item (Join-Path $root 'third_party\openvr\LICENSE') (Join-Path $stage 'licenses\OpenVR-LICENSE.txt')
 Copy-Item (Join-Path $root 'third_party\openxr\LICENSE') (Join-Path $stage 'licenses\OpenXR-LICENSE.txt')
 

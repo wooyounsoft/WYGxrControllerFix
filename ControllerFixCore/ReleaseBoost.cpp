@@ -1,12 +1,17 @@
 #include "ReleaseBoost.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace controllerfix {
 
 namespace {
 
+constexpr double MIN_DIRECTION_LENGTH = 1e-9;
+constexpr double HALF = 0.5;
+
 double speed(const Vec3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
+Vec3 scaled(const Vec3& v, double s) { return {v.x * s, v.y * s, v.z * s}; }
 
 }  // namespace
 
@@ -37,6 +42,22 @@ bool ReleaseBoost::updateGrip(double timeSec, double value, ReleaseEvent& event)
     if (event.peakAgeSec > m_config.maxPeakAgeSec) return false;
 
     m_holdVelocity = peak->velocity;
+    if (m_config.directionWindowSec > 0) {
+        Vec3 sum;
+        for (const Sample& s : m_history) {
+            if (std::fabs(s.timeSec - peak->timeSec) > m_config.directionWindowSec * HALF) continue;
+            sum = {sum.x + s.velocity.linear.x, sum.y + s.velocity.linear.y, sum.z + s.velocity.linear.z};
+        }
+        double length = speed(sum);
+        if (length > MIN_DIRECTION_LENGTH) m_holdVelocity.linear = scaled(sum, event.peakSpeed / length);
+    }
+    if (m_config.maxRatio > 0) {
+        double limit = std::max(event.currentSpeed * m_config.maxRatio, m_config.minSpeed);
+        if (event.peakSpeed > limit) {
+            m_holdVelocity.linear = scaled(m_holdVelocity.linear, limit / event.peakSpeed);
+            event.peakSpeed = limit;
+        }
+    }
     m_holdUntilSec = timeSec + m_config.holdSec;
     return true;
 }

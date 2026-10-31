@@ -14,7 +14,7 @@ set_target_properties(OpenXRLayer PROPERTIES
 )
 target_include_directories(OpenXRLayer PRIVATE ${CMAKE_SOURCE_DIR}/third_party/openxr/include)
 target_compile_definitions(OpenXRLayer PRIVATE XR_NO_PROTOTYPES)
-target_link_libraries(OpenXRLayer PRIVATE ControllerFixCore)
+target_link_libraries(OpenXRLayer PRIVATE ControllerFixCore VirtualPad)
 
 add_custom_command(TARGET OpenXRLayer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_CURRENT_SOURCE_DIR}/${LAYER_NAME}.json ${LAYER_DEPLOY_DIR}/${LAYER_NAME}.json

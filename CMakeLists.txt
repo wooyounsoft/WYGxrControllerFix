@@ -13,7 +13,11 @@ FetchContent_Declare(minhook
     GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
     GIT_TAG v1.3.3
 )
-FetchContent_MakeAvailable(minhook)
+FetchContent_Declare(vigemclient
+    GIT_REPOSITORY https://github.com/nefarius/ViGEmClient.git
+    GIT_TAG b66d02d57e32cc8595369c53418b843e958649b4
+)
+FetchContent_MakeAvailable(minhook vigemclient)
 # v1.3.3에는 CMake 타깃이 없어 직접 빌드
 add_library(minhook STATIC
     ${minhook_SOURCE_DIR}/src/buffer.c
@@ -22,6 +26,10 @@ add_library(minhook STATIC
     ${minhook_SOURCE_DIR}/src/hde/hde64.c
 )
 target_include_directories(minhook PUBLIC ${minhook_SOURCE_DIR}/include)
+
+add_library(VirtualPad STATIC VirtualPad/VirtualPad.cpp VirtualPad/VirtualPad.h)
+target_include_directories(VirtualPad PUBLIC ${CMAKE_SOURCE_DIR}/VirtualPad)
+target_link_libraries(VirtualPad PRIVATE ViGEmClient setupapi)
 
 add_subdirectory(ControllerFixCore)
 add_subdirectory(OpenVRDriver)

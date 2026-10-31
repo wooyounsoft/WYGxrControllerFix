@@ -13,6 +13,10 @@ if (-not (Test-Path (Join-Path $driverDir 'driver.vrdrivermanifest'))) {
     Write-Host "드라이버 폴더를 찾을 수 없습니다 / Driver folder not found: $driverDir"
     exit 1
 }
+if (Get-Process vrserver -ErrorAction SilentlyContinue) {
+    Write-Host 'SteamVR을 먼저 종료하세요 / Please close SteamVR first.'
+    exit 1
+}
 # VDXR(OpenXR) 게임용 레이어 등록 (현재 사용자, 관리자 권한 불필요)
 $layerJson = Join-Path $PSScriptRoot 'openxr\XR_APILAYER_WY_gxr_controllerfix.json'
 $layerKey = 'HKCU:\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit'
@@ -27,10 +31,6 @@ foreach ($name in (Get-Item $layerKey).GetValueNames()) {
 New-ItemProperty -Path $layerKey -Name $layerJson -PropertyType DWord -Value 0 -Force | Out-Null
 Write-Host "VDXR 레이어 등록 / OpenXR layer registered: $layerJson"
 
-if (Get-Process vrserver -ErrorAction SilentlyContinue) {
-    Write-Host 'SteamVR을 먼저 종료하세요 / Please close SteamVR first.'
-    exit 1
-}
 if (-not (Test-Path $pathsFile)) {
     Write-Host 'SteamVR이 설치되어 있지 않거나 한 번도 실행되지 않았습니다 / SteamVR not found.'
     exit 1
@@ -39,12 +39,12 @@ if (-not (Test-Path $pathsFile)) {
 $runtime = (Get-Content $pathsFile -Raw | ConvertFrom-Json).runtime[0]
 $vrpathreg = Join-Path $runtime 'bin\win64\vrpathreg.exe'
 
-# 이전 이름(GxrThrowFix)으로 설치된 드라이버가 있으면 보정이 두 번 적용되므로 등록 해제
-$legacyDriverName = 'gxrthrowfix'
+# 이전 이름(GxrThrowFix)이나 다른 폴더에 설치된 드라이버가 있으면 보정이 두 번 적용되므로 등록 해제
+$oldDriverNames = @('gxrthrowfix', (Split-Path $driverDir -Leaf))
 foreach ($path in (Get-Content $pathsFile -Raw | ConvertFrom-Json).external_drivers) {
-    if ((Split-Path $path -Leaf) -eq $legacyDriverName) {
+    if ($oldDriverNames -contains (Split-Path $path -Leaf) -and $path -ne $driverDir) {
         & $vrpathreg removedriver $path
-        Write-Host "이전 버전(GxrThrowFix) 등록 해제 / Removed old GxrThrowFix: $path"
+        Write-Host "이전 설치 등록 해제 / Removed previous install: $path"
     }
 }
 
@@ -55,6 +55,18 @@ if (-not $registered) {
     Write-Host '등록 실패 / Registration failed.'
     exit 1
 }
+# D-pad 가상 패드용 드라이버: 없을 때만 설치 (관리자 권한 창이 뜸). 거절해도 나머지는 그대로 동작한다
+$vigemBus = Get-ChildItem $PSScriptRoot -Filter 'ViGEmBus_*.exe' | Select-Object -First 1
+if ($vigemBus -and -not (Get-Service ViGEmBus -ErrorAction SilentlyContinue)) {
+    Write-Host 'D-pad 가상 패드용 ViGEmBus 드라이버를 설치합니다. 관리자 권한 창에서 허용해 주세요.'
+    Write-Host 'Installing the ViGEmBus driver for the D-pad virtual gamepad. Please allow the admin prompt.'
+    try {
+        Start-Process $vigemBus.FullName -Verb RunAs -Wait
+    } catch {
+        Write-Host '건너뜀. 나중에 설치하려면 폴더의 ViGEmBus 설치 파일을 실행하세요 / Skipped. Run the ViGEmBus installer in this folder later.'
+    }
+}
+
 Write-Host ''
 Write-Host "설치 완료 / Installed: $driverDir"
 Write-Host 'SteamVR을 실행하면 자동으로 적용됩니다. 이 폴더를 옮기거나 지우지 마세요.'

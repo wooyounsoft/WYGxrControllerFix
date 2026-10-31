@@ -10,13 +10,14 @@ Tunes Samsung **Galaxy XR** controllers for PCVR through **Virtual Desktop**: St
 - **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed (on by default).
 - **Automatic**: active for Galaxy XR only. Quest and Steam Link are left untouched.
 - **Hand position accuracy** (SteamVR games): hand position and angle match your real hand more closely.
+- **D-pad gesture**: put your left hand near your face and use the left stick as a D-pad (on by default, turn it off in `manager.bat`; the choice is kept).
 - **Optional tuning** (off by default): stronger haptics, controller angle, thumbstick deadzone/curve.
 
 ## Install
 
 1. Download the latest zip from [Releases](../../releases).
 2. Close SteamVR, extract to a permanent folder (e.g. `C:\Tools\WYGxrControllerFix`).
-3. Run `install.bat`. It registers the SteamVR add-on and the VDXR layer (current user, no admin needed).
+3. Run `install.bat`. It registers the SteamVR add-on and the VDXR layer (current user, no admin needed). If the ViGEmBus driver for the D-pad virtual gamepad is missing, it runs the included installer (admin prompt; you can skip it).
 
 Uninstall: close SteamVR, run `uninstall.bat`, delete the folder.
 Temporarily disable: SteamVR Settings → Startup/Shutdown → Manage Add-ons → `wygxrcontrollerfix`.
@@ -30,15 +31,22 @@ Settings: `%LOCALAPPDATA%\WYGxrControllerFix\settings.ini` (applied live while a
 | `releaseBoost` | `1` | keep throw speed after grip release |
 | `releasePeakMs` / `releaseHoldMs` | `150` / `60` | release boost window / hold time |
 | `releaseMaxPeakAgeMs` | `80` | skip the boost when the peak is older than this (stop, then place) |
+| `releaseDirWindowMs` | `65` | average the throw direction over this window (`0` = off) |
+| `releaseMaxRatio` | `0` | limit the boost to this multiple of the release speed (`0` = no limit) |
+| `releaseButton` | `grip` | button that holds objects: `grip` or `trigger` |
+| `spikeGuard` / `spikeMaxSpeed` / `spikeHoldMs` | `1` / `25` / `150` | ignore sudden tracking jumps |
+| `vdAngularPitchDeg` | `13` | wrist-rotation correction angle |
+| `dpadEmulation` / `dpadThreshold` | `1` / `0.5` | left hand near your face + left stick = D-pad: the game's own D-pad input, or a virtual Xbox pad (ViGEmBus, included). Turns itself off in UEVR games |
+| `dpadHaptic` | `1` | short left-hand vibration when the D-pad turns on (VDXR games) |
+| `dpadTrigger` / `dpadGestureDist` | `gesture` / `0.22` | `gesture` or `stick` (hold right stick click) / hand-to-head distance in m |
 | `openxrEnabled` | `1` | VDXR games on/off |
 | `poseLagFix` | `1` | hand position accuracy (SteamVR games) |
 | `hapticBoost` / `hapticGain` / `hapticMinMs` | `0` / `1.5` / `20` | stronger haptics |
 | `angleOffset` / `angleOffsetDeg` | `0` / `0` | controller angle (+ = tip up) |
 | `stickTuning` / `stickDeadzone` / `stickCurve` | `0` / `0.10` / `1.0` | thumbstick deadzone / response curve |
 
-Manager: run `manager.bat`. It shows whether the add-on and the VDXR layer are registered,
-whether the fix was active (`GXR detected -> fix ON`) in the last SteamVR / VDXR game,
-and turns the fixes on/off (applies within 1 s, even in game).
+Manager: run `manager.bat` to turn each feature on/off (applies within 1 s, even in game; the setting is kept).
+Press `S` for status: whether the add-on and VDXR layer are registered and whether the fix was active in the last game.
 For the last VDXR game it also shows whether the game requests the runtime's velocity (the fix applies; whether throws actually use it
 depends on the game) or never asks for it (throws are computed from hand movement, fix not involved).
 
@@ -62,12 +70,12 @@ Requires Visual Studio 2022 and CMake 3.20+.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build\Release\EstimatorTest.exe
-tools\package.ps1 -Version 0.5.0
+tools\package.ps1 -Version 0.6.0
 ```
 
 ## License
 
-MIT. Third-party: MinHook (BSD 2-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0).
+MIT. Third-party: MinHook (BSD 2-Clause), ViGEmClient (MIT), ViGEmBus installer (BSD 3-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0).
 
 ---
 
@@ -80,10 +88,11 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 - **자동 판별**: Galaxy XR에서만 켜지고 Quest, Steam Link에서는 꺼집니다.
 - **VDXR 게임**: 게임에 따라 효과가 다릅니다. 손 움직임으로 던지기를 직접 계산하는 게임은 원래도 잘 되고, 그대로 둡니다.
 - **손 위치 정확도** (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
-- **취향 조정** (기본 꺼짐): 진동 강화, 컨트롤러 각도 조정, 스틱 데드존/감도. `manager.bat`에서 켜고 끕니다.
+- **D-pad 제스처**: 왼손을 얼굴 가까이 대고 왼쪽 스틱을 밀면 D-pad로 동작합니다 (기본 켜짐, `manager.bat`에서 끄면 그대로 유지).
+- **취향 조정** (기본 꺼짐): 진동 강화, 컨트롤러 각도 조정 (`settings.ini`), 스틱 데드존/감도 (`manager.bat`).
 
 설치: [Releases](../../releases)에서 zip을 받아 고정된 폴더에 풀고, SteamVR을 끈 상태에서 `install.bat`을 실행합니다.
-관리 도구: `manager.bat`을 실행하면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 주고, 보정을 켜고 끌 수 있습니다.
+관리 도구: `manager.bat`을 실행하면 기능을 번호로 켜고 끕니다. `S`를 누르면 설치 상태와 마지막 게임에서 보정이 켜졌는지 보여 줍니다.
 마지막 VDXR 게임이 런타임 속도를 요청하는지(보정 적용, 던지기에 실제로 쓰는지는 게임마다 다름), 아예 요청하지 않는지(손 움직임으로 직접 계산, 보정 영향 없음)도 보여 줍니다.
 자세한 설명은 zip 안의 `README.txt`를 보세요.
 

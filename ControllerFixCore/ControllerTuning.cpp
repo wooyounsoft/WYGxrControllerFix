@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "QuatMath.h"
+#include "VdFrameFix.h"
 
 namespace controllerfix {
 
@@ -28,7 +29,26 @@ Quat normalized(const Quat& q) {
     return {q.w / n, q.x / n, q.y / n, q.z / n};
 }
 
+Vec3 scaled(const Vec3& v, double s) { return {v.x * s, v.y * s, v.z * s}; }
+
 }  // namespace
+
+bool SpikeGuard::isSpike(const SpikeGuardConfig& config, double timeSec, double speed) {
+    if (!config.enabled || speed <= config.maxSpeed) {
+        m_startSec = NOT_STARTED;
+        return false;
+    }
+    if (m_startSec == NOT_STARTED) m_startSec = timeSec;
+    return timeSec - m_startSec <= config.maxHoldSec;
+}
+
+DpadState dpadFromStick(const DpadConfig& config, const Vec2& stick) {
+    return {stick.y >= config.threshold, stick.y <= -config.threshold, stick.x <= -config.threshold, stick.x >= config.threshold};
+}
+
+bool dpadGestureHeld(const DpadConfig& config, bool held, double distance) {
+    return distance <= config.gestureDistance * (held ? DpadConfig::GESTURE_RELEASE_RATIO : 1.0);
+}
 
 void tuneHaptic(const HapticConfig& config, double& amplitude, double& durationSec) {
     if (!config.enabled) return;
@@ -67,6 +87,21 @@ void leadPose(double leadSec, const Vec3& linear, const Vec3& angular, Vec3& pos
     position.z += leadSec * linear.z;
     Quat step = fromRotationVector({leadSec * angular.x, leadSec * angular.y, leadSec * angular.z});
     rotation = normalized(multiply(step, rotation));
+}
+
+VdPose fixVdPose(const VdPose& reported, const VdPoseConfig& config) {
+    VdPose out = reported;
+    out.linear = vdLocalToWorld(reported.rotation, reported.linear, config.pitchDeg);
+    out.acceleration = vdLocalToWorld(reported.rotation, reported.acceleration, config.pitchDeg);
+    Vec3 angularWorld = vdDriverAngularToWorld(reported.rotation, reported.angular, config.angularPitchDeg);
+    if (config.poseLagSec != 0)
+        correctPoseLag(config.poseLagSec, reported.linear, out.linear, rotate(reported.rotation, reported.angular), angularWorld,
+                       out.position, out.rotation);
+    if (config.poseLeadSec != 0) leadPose(config.poseLeadSec, out.linear, angularWorld, out.position, out.rotation);
+    out.linear = scaled(out.linear, config.linearScale);
+    out.acceleration = scaled(out.acceleration, config.linearScale);
+    out.angular = scaled(rotate(conjugate(out.rotation), angularWorld), config.angularScale);
+    return out;
 }
 
 }  // namespace controllerfix

@@ -2,12 +2,15 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "DriverLog.h"
 #include "QuatMath.h"
+#include "UevrDetector.h"
 #include "VdFrameFix.h"
 #include "VdShmDump.h"
+#include "VirtualPad.h"
 
 namespace {
 
@@ -66,6 +69,24 @@ void store(double out[3], const controllerfix::Vec3& v) {
     out[2] = v.z;
 }
 
+// 드라이버 기준 위치 → SteamVR world
+controllerfix::Vec3 worldPosition(const vr::DriverPose_t& pose) {
+    controllerfix::Vec3 p = controllerfix::rotate(toQuat(pose.qWorldFromDriverRotation), toVec3(pose.vecPosition));
+    return {p.x + pose.vecWorldFromDriverTranslation[0], p.y + pose.vecWorldFromDriverTranslation[1], p.z + pose.vecWorldFromDriverTranslation[2]};
+}
+
+double speedOf(const double v[3]) { return std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); }
+
+void restoreMotion(vr::DriverPose_t& pose, const vr::DriverPose_t& from) {
+    constexpr size_t VEC3_SIZE = sizeof(double) * 3;
+    std::memcpy(pose.vecPosition, from.vecPosition, VEC3_SIZE);
+    std::memcpy(pose.vecVelocity, from.vecVelocity, VEC3_SIZE);
+    std::memcpy(pose.vecAcceleration, from.vecAcceleration, VEC3_SIZE);
+    std::memcpy(pose.vecAngularVelocity, from.vecAngularVelocity, VEC3_SIZE);
+    std::memcpy(pose.vecAngularAcceleration, from.vecAngularAcceleration, VEC3_SIZE);
+    pose.qRotation = from.qRotation;
+}
+
 }  // namespace
 
 PoseFixer& PoseFixer::I() {
@@ -77,6 +98,7 @@ PoseFixer::PoseFixer() : m_settingsFile(settingsPath()) {}
 
 void PoseFixer::initSettings() {
     std::lock_guard lock(m_mutex);
+    VirtualPad::I().setLogger([](const char* message) { DriverLog("%s", message); });
     m_settingsFile.ensureExists();
     m_settingsFile.reloadIfChanged(m_settings);
     applySettings();
@@ -106,11 +128,18 @@ void PoseFixer::applySettings() {
               m_settings.blend.linearLow, m_settings.blend.linearHigh, m_settings.blend.angularLow,
               m_settings.blend.angularHigh);
     VdShmDump::setEnabled(m_settings.vdDump);
-    DriverLog("vdFrameFix=%s pitch %.1f deg", vdFixModeName(m_settings.vdFix.mode), m_settings.vdFix.pitchDeg);
-    DriverLog("releaseBoost=%d peak %.0f ms hold %.0f ms maxPeakAge %.0f ms minSpeed %.2f grip %.2f/%.2f",
+    DriverLog("vdFrameFix=%s pitch %.1f deg angular %.1f deg", vdFixModeName(m_settings.vdFix.mode), m_settings.vdFix.pitchDeg,
+              m_settings.vdFix.angularPitchDeg);
+    DriverLog("releaseBoost=%d peak %.0f ms hold %.0f ms maxPeakAge %.0f ms minSpeed %.2f grip %.2f/%.2f dirWindow %.0f ms maxRatio %.1f button=%s",
               m_settings.releaseBoost.enabled, m_settings.releaseBoost.peakWindowSec * MS_PER_SEC,
               m_settings.releaseBoost.holdSec * MS_PER_SEC, m_settings.releaseBoost.maxPeakAgeSec * MS_PER_SEC,
-              m_settings.releaseBoost.minSpeed, m_settings.releaseBoost.gripPress, m_settings.releaseBoost.gripRelease);
+              m_settings.releaseBoost.minSpeed, m_settings.releaseBoost.gripPress, m_settings.releaseBoost.gripRelease,
+              m_settings.releaseBoost.directionWindowSec * MS_PER_SEC, m_settings.releaseBoost.maxRatio,
+              m_settings.releaseBoost.button == controllerfix::ReleaseButton::Trigger ? "trigger" : "grip");
+    DriverLog("dpadEmulation=%d trigger=%s dist %.2f threshold %.2f", m_settings.dpad.enabled, m_settings.dpad.gesture ? "gesture" : "stick",
+              m_settings.dpad.gestureDistance, m_settings.dpad.threshold);
+    DriverLog("spikeGuard=%d max %.0f m/s hold %.0f ms", m_settings.spikeGuard.enabled, m_settings.spikeGuard.maxSpeed,
+              m_settings.spikeGuard.maxHoldSec * MS_PER_SEC);
     DriverLog("poseLagFix=%d %.0f ms, poseLead %.0f ms, angularOutput=%s", m_settings.poseLagFix,
               m_settings.poseLagSec * MS_PER_SEC, m_settings.poseLeadSec * MS_PER_SEC,
               m_settings.angularOutputWorld ? "world" : "local");
@@ -131,8 +160,8 @@ void PoseFixer::tick() {
         m_nextStatsLog = now + STATS_LOG_INTERVAL;
         for (uint32_t i = 0; i < m_devices.size(); ++i) {
             if (m_devices[i].kind == DeviceKind::Target)
-                DriverLog("device %u: replaced %llu poses, release boosts %llu", i, m_devices[i].replacedCount,
-                          m_devices[i].boostCount);
+                DriverLog("device %u: replaced %llu poses, release boosts %llu, spike frames %llu", i, m_devices[i].replacedCount,
+                          m_devices[i].boostCount, m_devices[i].spikeCount);
         }
         if (m_hapticCount) DriverLog("haptic events tuned: %llu", m_hapticCount);
     }
@@ -170,18 +199,32 @@ void PoseFixer::process(uint32_t deviceIndex, vr::DriverPose_t& pose) {
     std::lock_guard lock(m_mutex);
     if (!m_settings.enabled) return;
 
+    if (deviceIndex == vr::k_unTrackedDeviceIndex_Hmd && pose.poseIsValid) {
+        m_headPosition = worldPosition(pose);
+        m_hasHead = true;
+    }
     DeviceState& dev = m_devices[deviceIndex];
     if (dev.kind == DeviceKind::Unknown) dev.kind = classify(deviceIndex);
     if (dev.kind != DeviceKind::Target) return;
+    updateDpadGesture(dev, deviceIndex, pose);
 
     if (!pose.poseIsValid || pose.result != vr::TrackingResult_Running_OK) {
         dev.estimator.reset();
+        dev.hasLastOutput = false;
         return;
     }
 
     const vr::DriverPose_t original = pose;
     controllerfix::PoseSample sample;
     sample.timeSec = nowSec() + pose.poseTimeOffset;
+    // 추적 튐: 추정/판별/놓기 기록에 넣지 않고 마지막 보정 결과를 유지한다
+    if (dev.spikeGuard.isSpike(m_settings.spikeGuard, sample.timeSec, speedOf(pose.vecVelocity)) && dev.hasLastOutput) {
+        restoreMotion(pose, dev.lastOutput);
+        ++dev.spikeCount;
+        applyAngleOffset(pose);
+        VdShmDump::write(deviceIndex, original, pose);
+        return;
+    }
     sample.position = toVec3(pose.vecPosition);
     sample.rotation = toQuat(pose.qRotation);
     dev.estimator.addSample(sample);
@@ -190,13 +233,10 @@ void PoseFixer::process(uint32_t deviceIndex, vr::DriverPose_t& pose) {
     if (m_settings.vdFix.mode == controllerfix::VdFixMode::Off) {
         applyEstimator(dev, sample.timeSec, pose);
     } else {
-        vr::DriverPose_t candidate = pose;
-        applyVdFrameFix(dev, deviceIndex, candidate);
+        logFrameInfo(dev, deviceIndex, pose);
         // Auto 에서 보정이 필요 없는 기기 (Quest 등)로 판정되면 속도/위치는 원래 값 그대로
-        if (m_settings.vdFix.mode == controllerfix::VdFixMode::On || useVdFrameFix(dev, deviceIndex, original, candidate)) {
-            pose = candidate;
-            if (m_settings.poseLagFix) applyPoseLagFix(original, pose);
-            if (m_settings.poseLeadSec != 0) applyPoseLead(pose);
+        if (m_settings.vdFix.mode == controllerfix::VdFixMode::On || useVdFrameFix(dev, deviceIndex, original)) {
+            applyVdPoseFix(pose);
             frameFixed = true;
             ++dev.replacedCount;
         }
@@ -206,6 +246,10 @@ void PoseFixer::process(uint32_t deviceIndex, vr::DriverPose_t& pose) {
     // (Alyx 체감: world 는 정상, local 은 아래에서 던질 때 위로 튐 — 2026-10-28)
     if (frameFixed && m_settings.angularOutputWorld)
         store(pose.vecAngularVelocity, controllerfix::rotate(toQuat(pose.qRotation), toVec3(pose.vecAngularVelocity)));
+    if (frameFixed) {
+        dev.lastOutput = pose;
+        dev.hasLastOutput = true;
+    }
     applyAngleOffset(pose);
     VdShmDump::write(deviceIndex, original, pose);
 }
@@ -238,32 +282,6 @@ void PoseFixer::applyReleaseBoost(DeviceState& dev, double timeSec, vr::DriverPo
               controllerfix::rotate(controllerfix::conjugate(rotation), held.angular), FULL_WEIGHT);
 }
 
-// 손 위치 정확도: VD 쪽에서 원래 속도로 되돌린 포즈를 보정 속도로 되돌린 포즈로 바꾼다.
-// applyVdFrameFix 뒤에 호출: pose 의 각속도는 원래 회전 기준 로컬 값.
-void PoseFixer::applyPoseLagFix(const vr::DriverPose_t& original, vr::DriverPose_t& pose) const {
-    controllerfix::Quat originalRotation = toQuat(original.qRotation);
-    controllerfix::Vec3 reportedAngular = controllerfix::rotate(originalRotation, toVec3(original.vecAngularVelocity));
-    controllerfix::Vec3 fixedAngular = controllerfix::rotate(originalRotation, toVec3(pose.vecAngularVelocity));
-    controllerfix::Vec3 position = toVec3(pose.vecPosition);
-    controllerfix::Quat rotation = originalRotation;
-    controllerfix::correctPoseLag(m_settings.poseLagSec, toVec3(original.vecVelocity), toVec3(pose.vecVelocity),
-                                  reportedAngular, fixedAngular, position, rotation);
-    store(pose.vecPosition, position);
-    pose.qRotation = toHmd(rotation);
-    store(pose.vecAngularVelocity, controllerfix::rotate(controllerfix::conjugate(rotation), fixedAngular));
-}
-
-// 보정된 속도로 손 포즈를 앞당긴다. pose 의 각속도는 qRotation 기준 로컬 값.
-void PoseFixer::applyPoseLead(vr::DriverPose_t& pose) const {
-    controllerfix::Quat rotation = toQuat(pose.qRotation);
-    controllerfix::Vec3 angularWorld = controllerfix::rotate(rotation, toVec3(pose.vecAngularVelocity));
-    controllerfix::Vec3 position = toVec3(pose.vecPosition);
-    controllerfix::leadPose(m_settings.poseLeadSec, toVec3(pose.vecVelocity), angularWorld, position, rotation);
-    store(pose.vecPosition, position);
-    pose.qRotation = toHmd(rotation);
-    store(pose.vecAngularVelocity, controllerfix::rotate(controllerfix::conjugate(rotation), angularWorld));
-}
-
 void PoseFixer::applyAngleOffset(vr::DriverPose_t& pose) const {
     if (!m_settings.angleOffset.enabled) return;
     // 모델 오프셋(qDriverFromHeadRotation) 뒤에 곱해서 손 기준으로 기울인다. 위치와 속도는 그대로.
@@ -285,11 +303,19 @@ void PoseFixer::onComponentCreated(vr::PropertyContainerHandle_t container, cons
             }
         }
     }
+    if (!scalar) {
+        for (const char* click : STICK_CLICK_PATHS) {
+            if (path != click) continue;
+            m_stickClicks[handle] = container;
+            return;
+        }
+    }
     bool grip = scalar ? path == GRIP_VALUE_PATH : path == GRIP_CLICK_PATH;
-    if (!grip) return;
-    m_gripComponents[handle] = {container, scalar};
+    bool trigger = scalar ? path == TRIGGER_VALUE_PATH : path == TRIGGER_CLICK_PATH;
+    if (!grip && !trigger) return;
+    m_gripComponents[handle] = {container, scalar, trigger};
     int device = deviceForContainer(container);
-    if (scalar && device >= 0) m_devices[device].hasScalarGrip = true;
+    if (scalar && device >= 0) (trigger ? m_devices[device].hasScalarTrigger : m_devices[device].hasScalarGrip) = true;
     DriverLog("grip component '%s' created (device %d)", name, device);
 }
 
@@ -302,6 +328,11 @@ float PoseFixer::onScalarUpdated(vr::VRInputComponentHandle_t handle, float valu
             if (device < 0 || !m_settings.enabled || m_devices[device].kind != DeviceKind::Target) return value;
             DeviceState& dev = m_devices[device];
             dev.stickRaw[stick->second.axis] = value;
+            if (dpadActive() && m_dpadHeld && isHand(stick->second.container, vr::TrackedControllerRole_LeftHand)) {
+                controllerfix::DpadState dpad = controllerfix::dpadFromStick(m_settings.dpad, {dev.stickRaw[0], dev.stickRaw[1]});
+                VirtualPad::I().setDpad(dpad.up, dpad.down, dpad.left, dpad.right);
+                return 0;  // D-pad 로 쓰는 동안 게임에는 스틱을 놓은 것으로 보낸다
+            }
             controllerfix::Vec2 shaped = controllerfix::shapeStick(m_settings.stick, {dev.stickRaw[0], dev.stickRaw[1]});
             return static_cast<float>(stick->second.axis == 0 ? shaped.x : shaped.y);
         }
@@ -310,7 +341,45 @@ float PoseFixer::onScalarUpdated(vr::VRInputComponentHandle_t handle, float valu
     return value;
 }
 
+bool PoseFixer::dpadActive() const { return m_settings.dpad.enabled && !UevrDetector::I().running(); }
+
+void PoseFixer::setDpadHeld(bool held) {
+    if (held == m_dpadHeld) return;
+    m_dpadHeld = held;
+    if (!held) VirtualPad::I().setDpad(false, false, false, false);
+    DriverLog("D-pad %s", held ? "on" : "off");
+}
+
+void PoseFixer::updateDpadGesture(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose) {
+    if (!dpadActive()) {
+        setDpadHeld(false);
+        return;
+    }
+    if (!m_settings.dpad.gesture || !m_hasHead || !pose.poseIsValid) return;
+    if (dev.role == vr::TrackedControllerRole_Invalid) {
+        vr::CVRPropertyHelpers* props = vr::VRProperties();
+        dev.role = props->GetInt32Property(props->TrackedDeviceToPropertyContainer(deviceIndex), vr::Prop_ControllerRoleHint_Int32);
+    }
+    if (dev.role != vr::TrackedControllerRole_LeftHand) return;
+    controllerfix::Vec3 hand = worldPosition(pose);
+    double dx = hand.x - m_headPosition.x, dy = hand.y - m_headPosition.y, dz = hand.z - m_headPosition.z;
+    setDpadHeld(controllerfix::dpadGestureHeld(m_settings.dpad, m_dpadHeld, std::sqrt(dx * dx + dy * dy + dz * dz)));
+}
+
+bool PoseFixer::isHand(vr::PropertyContainerHandle_t container, vr::ETrackedControllerRole role) {
+    return vr::VRProperties()->GetInt32Property(container, vr::Prop_ControllerRoleHint_Int32) == role;
+}
+
 void PoseFixer::onBooleanUpdated(vr::VRInputComponentHandle_t handle, bool value, double timeOffset) {
+    {
+        std::lock_guard lock(m_mutex);
+        auto click = m_stickClicks.find(handle);
+        if (click != m_stickClicks.end()) {
+            if (dpadActive() && !m_settings.dpad.gesture && isHand(click->second, vr::TrackedControllerRole_RightHand))
+                setDpadHeld(value);
+            return;
+        }
+    }
     onGripValue(handle, value ? 1.0 : 0.0, timeOffset);
 }
 
@@ -350,7 +419,9 @@ void PoseFixer::onGripValue(vr::VRInputComponentHandle_t handle, double value, d
     if (device < 0) return;
     DeviceState& dev = m_devices[device];
     if (dev.kind != DeviceKind::Target) return;
-    if (!it->second.scalar && dev.hasScalarGrip) return;  // 값 그립이 있으면 click 은 무시 (중복 해제 방지)
+    if (it->second.trigger != (m_settings.releaseBoost.button == controllerfix::ReleaseButton::Trigger)) return;
+    bool hasScalar = it->second.trigger ? dev.hasScalarTrigger : dev.hasScalarGrip;
+    if (!it->second.scalar && hasScalar) return;  // 값 입력이 있으면 click 은 무시 (중복 해제 방지)
     controllerfix::ReleaseEvent ev;
     if (dev.releaseBoost.updateGrip(nowSec() + timeOffset, value, ev)) {
         ++dev.boostCount;
@@ -360,10 +431,12 @@ void PoseFixer::onGripValue(vr::VRInputComponentHandle_t handle, double value, d
 }
 
 // 판정 전에는 적용한다 (설치 대상이 GXR 사용자). 정상 기기로 판정되면 끈다.
-bool PoseFixer::useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& original, const vr::DriverPose_t& fixed) {
+bool PoseFixer::useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& original) {
     controllerfix::VelocityEstimate measured;
-    if (dev.estimator.estimate(measured))
-        dev.detector.addVote(measured.linear, toVec3(original.vecVelocity), toVec3(fixed.vecVelocity));
+    if (dev.estimator.estimate(measured)) {
+        controllerfix::Vec3 raw = toVec3(original.vecVelocity);
+        dev.detector.addVote(measured.linear, raw, controllerfix::vdLocalToWorld(toQuat(original.qRotation), raw, m_settings.vdFix.pitchDeg));
+    }
     controllerfix::VdFrameDetector::Verdict verdict = dev.detector.verdict();
     if (verdict != dev.loggedVerdict) {
         dev.loggedVerdict = verdict;
@@ -373,23 +446,32 @@ bool PoseFixer::useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::
     return verdict != controllerfix::VdFrameDetector::Verdict::Normal;
 }
 
+void PoseFixer::logFrameInfo(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose) {
+    if (dev.frameLogged) return;
+    dev.frameLogged = true;
+    // driver_oculus 는 Touch 모델 오프셋(약 39°)을 qDriverFromHeadRotation 에 넣고 qRotation 은 VD 원본 회전을 둔다.
+    // 0° 근처로 나오면 qRotation 에 오프셋이 섞인 것이므로 보정 기준이 맞지 않는다는 뜻.
+    double offsetDeg = QUAT_ANGLE_FACTOR * std::acos(std::fmin(1.0, std::fabs(pose.qDriverFromHeadRotation.w))) * RAD_TO_DEG;
+    DriverLog("device %u vdFrameFix: pitch %.1f deg, qDriverFromHeadRotation %.1f deg", deviceIndex,
+              m_settings.vdFix.pitchDeg, offsetDeg);
+}
+
 // 선속도/가속도는 world, 각속도는 DriverPose 규약대로 qRotation 기준 로컬 값으로 넣는다.
-void PoseFixer::applyVdFrameFix(DeviceState& dev, uint32_t deviceIndex, vr::DriverPose_t& pose) {
-    if (!dev.frameLogged) {
-        dev.frameLogged = true;
-        // driver_oculus 는 Touch 모델 오프셋(약 39°)을 qDriverFromHeadRotation 에 넣고 qRotation 은 VD 원본 회전을 둔다.
-        // 0° 근처로 나오면 qRotation 에 오프셋이 섞인 것이므로 보정 기준이 맞지 않는다는 뜻.
-        double offsetDeg = QUAT_ANGLE_FACTOR * std::acos(std::fmin(1.0, std::fabs(pose.qDriverFromHeadRotation.w))) * RAD_TO_DEG;
-        DriverLog("device %u vdFrameFix: pitch %.1f deg, qDriverFromHeadRotation %.1f deg", deviceIndex,
-                  m_settings.vdFix.pitchDeg, offsetDeg);
-    }
-    controllerfix::Quat rotation = toQuat(pose.qRotation);
-    double pitch = m_settings.vdFix.pitchDeg;
+void PoseFixer::applyVdPoseFix(vr::DriverPose_t& pose) const {
+    controllerfix::VdPose reported{toVec3(pose.vecPosition), toQuat(pose.qRotation), toVec3(pose.vecVelocity),
+                                   toVec3(pose.vecAngularVelocity), toVec3(pose.vecAcceleration)};
+    controllerfix::VdPoseConfig config;
+    config.pitchDeg = m_settings.vdFix.pitchDeg;
+    config.angularPitchDeg = m_settings.vdFix.angularPitchDeg;
+    config.poseLagSec = m_settings.poseLagFix ? m_settings.poseLagSec : 0;
+    config.poseLeadSec = m_settings.poseLeadSec;
     // linearScale / angularScale: 게임별 세기 조절 (가속도도 같은 배율이라야 SteamVR 외삽이 맞음)
-    double linearScale = m_settings.estimator.linearScale;
-    double angularScale = m_settings.estimator.angularScale;
-    controllerfix::Vec3 angularWorld = controllerfix::vdDriverAngularToWorld(rotation, toVec3(pose.vecAngularVelocity), pitch);
-    store(pose.vecVelocity, scaled(controllerfix::vdLocalToWorld(rotation, toVec3(pose.vecVelocity), pitch), linearScale));
-    store(pose.vecAngularVelocity, scaled(controllerfix::rotate(controllerfix::conjugate(rotation), angularWorld), angularScale));
-    store(pose.vecAcceleration, scaled(controllerfix::vdLocalToWorld(rotation, toVec3(pose.vecAcceleration), pitch), linearScale));
+    config.linearScale = m_settings.estimator.linearScale;
+    config.angularScale = m_settings.estimator.angularScale;
+    controllerfix::VdPose fixed = controllerfix::fixVdPose(reported, config);
+    store(pose.vecPosition, fixed.position);
+    pose.qRotation = toHmd(fixed.rotation);
+    store(pose.vecVelocity, fixed.linear);
+    store(pose.vecAngularVelocity, fixed.angular);
+    store(pose.vecAcceleration, fixed.acceleration);
 }

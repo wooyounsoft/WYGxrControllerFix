@@ -6,6 +6,8 @@
 
 namespace controllerfix {
 
+enum class ReleaseButton { Grip, Trigger };
+
 struct ReleaseBoostConfig {
     static constexpr double DEFAULT_PEAK_WINDOW_SEC = 0.150;  // 그립 해제 직전 이 구간의 최고 속도를 사용
     static constexpr double DEFAULT_HOLD_SEC = 0.060;         // 해제 후 이 시간 동안 최고 속도를 유지
@@ -15,6 +17,8 @@ struct ReleaseBoostConfig {
     static constexpr double DEFAULT_MAX_PEAK_AGE_SEC = 0.080;
     static constexpr double DEFAULT_GRIP_PRESS = 0.7;         // 그립 값 히스테리시스
     static constexpr double DEFAULT_GRIP_RELEASE = 0.4;
+    // 최고 속도 지점 앞뒤 이 구간의 평균 방향을 쓴다 (한 프레임 방향은 튄다). 0 = 끔
+    static constexpr double DEFAULT_DIRECTION_WINDOW_SEC = 0.065;
 
     bool enabled = true;
     double peakWindowSec = DEFAULT_PEAK_WINDOW_SEC;
@@ -23,6 +27,9 @@ struct ReleaseBoostConfig {
     double maxPeakAgeSec = DEFAULT_MAX_PEAK_AGE_SEC;
     double gripPress = DEFAULT_GRIP_PRESS;
     double gripRelease = DEFAULT_GRIP_RELEASE;
+    double directionWindowSec = DEFAULT_DIRECTION_WINDOW_SEC;
+    double maxRatio = 0;  // 보정 속도 상한 (놓는 순간 속도의 배수). 0 = 제한 없음
+    ReleaseButton button = ReleaseButton::Grip;  // 게임에서 물건을 잡는 버튼
 };
 
 struct ReleaseEvent {

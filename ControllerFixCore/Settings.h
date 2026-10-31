@@ -39,6 +39,8 @@ struct Settings {
     HapticConfig haptic;
     AngleOffsetConfig angleOffset;
     StickConfig stick;
+    SpikeGuardConfig spikeGuard;
+    DpadConfig dpad;
 };
 
 class SettingsFile {
@@ -50,10 +52,9 @@ public:
     // 변경됐으면 다시 읽고 true.
     bool reloadIfChanged(Settings& settings);
     const std::filesystem::path& path() const { return m_path; }
-
-private:
     static void parse(std::istream& in, Settings& settings);
 
+private:
     std::filesystem::path m_path;
     std::filesystem::file_time_type m_lastWrite{};
 };

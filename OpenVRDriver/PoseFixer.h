@@ -43,12 +43,18 @@ private:
         controllerfix::VelocityEstimator estimator;
         controllerfix::ReleaseBoost releaseBoost;
         bool hasScalarGrip = false;  // 값(0~1) 그립이 있으면 click 은 무시
+        bool hasScalarTrigger = false;
+        int role = vr::TrackedControllerRole_Invalid;
+        controllerfix::SpikeGuard spikeGuard;
+        vr::DriverPose_t lastOutput{};  // 튐 구간에 대신 내보낼 마지막 보정 결과
+        bool hasLastOutput = false;
         bool frameLogged = false;    // vdFrameFix: 첫 포즈의 qDriverFromHeadRotation 로그 여부
         controllerfix::VdFrameDetector detector;  // vdFrameFix=auto: 보정 필요 여부 판별
         controllerfix::VdFrameDetector::Verdict loggedVerdict = controllerfix::VdFrameDetector::Verdict::Undecided;
         std::array<double, STICK_AXIS_COUNT> stickRaw{};  // 스틱 x, y 원래 값 (원형 데드존 계산용)
         uint64_t replacedCount = 0;
         uint64_t boostCount = 0;
+        uint64_t spikeCount = 0;
     };
 
     PoseFixer();
@@ -56,16 +62,22 @@ private:
     void applySettings();
     int deviceForContainer(vr::PropertyContainerHandle_t container);
     void onGripValue(vr::VRInputComponentHandle_t handle, double value, double timeOffset);
-    void applyVdFrameFix(DeviceState& dev, uint32_t deviceIndex, vr::DriverPose_t& pose);
-    bool useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& original, const vr::DriverPose_t& fixed);
+    static bool isHand(vr::PropertyContainerHandle_t container, vr::ETrackedControllerRole role);
+    bool dpadActive() const;
+    void setDpadHeld(bool held);
+    void updateDpadGesture(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose);
+    void logFrameInfo(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose);
+    void applyVdPoseFix(vr::DriverPose_t& pose) const;
+    bool useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& original);
     void applyEstimator(DeviceState& dev, double timeSec, vr::DriverPose_t& pose);
-    void applyPoseLagFix(const vr::DriverPose_t& original, vr::DriverPose_t& pose) const;
-    void applyPoseLead(vr::DriverPose_t& pose) const;
     void applyReleaseBoost(DeviceState& dev, double timeSec, vr::DriverPose_t& pose);
     void applyAngleOffset(vr::DriverPose_t& pose) const;
 
     static constexpr const char* GRIP_VALUE_PATH = "/input/grip/value";
     static constexpr const char* GRIP_CLICK_PATH = "/input/grip/click";
+    static constexpr const char* TRIGGER_VALUE_PATH = "/input/trigger/value";
+    static constexpr const char* TRIGGER_CLICK_PATH = "/input/trigger/click";
+    static constexpr const char* STICK_CLICK_PATHS[] = {"/input/joystick/click", "/input/thumbstick/click"};
     static constexpr const char* STICK_AXIS_PATHS[][STICK_AXIS_COUNT] = {
         {"/input/joystick/x", "/input/joystick/y"},
         {"/input/thumbstick/x", "/input/thumbstick/y"},
@@ -74,6 +86,7 @@ private:
     struct GripComponent {
         vr::PropertyContainerHandle_t container;
         bool scalar;
+        bool trigger;  // false = 그립
     };
 
     struct StickAxis {
@@ -84,6 +97,10 @@ private:
     std::mutex m_mutex;
     std::map<vr::VRInputComponentHandle_t, GripComponent> m_gripComponents;
     std::map<vr::VRInputComponentHandle_t, StickAxis> m_stickAxes;
+    std::map<vr::VRInputComponentHandle_t, vr::PropertyContainerHandle_t> m_stickClicks;
+    bool m_dpadHeld = false;  // 이 동안 왼쪽 스틱은 D-pad
+    controllerfix::Vec3 m_headPosition;
+    bool m_hasHead = false;
     std::map<vr::PropertyContainerHandle_t, uint32_t> m_containerToDevice;
     controllerfix::SettingsFile m_settingsFile;
     controllerfix::Settings m_settings;

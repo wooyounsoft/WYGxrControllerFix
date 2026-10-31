@@ -18,6 +18,8 @@ const char* DEFAULT_INI =
     ";   1 = 항상 적용, 0 = 끄고 아래 추정/블렌딩 방식 사용\n"
     "vdFrameFix=auto\n"
     "vdFramePitchDeg=13\n"
+    "; 각속도 전용 pitch\n"
+    "vdAngularPitchDeg=13\n"
     "; 진단: 컨트롤러 원본 데이터를 captures 폴더에 CSV로 기록\n"
     "vdDump=0\n"
     "; 회귀에 쓰는 과거 구간 (ms)\n"
@@ -58,8 +60,18 @@ const char* DEFAULT_INI =
     "; 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 보정 안 함 (멈췄다가 내려놓을 때 튀어 나가지 않게)\n"
     "releaseMaxPeakAgeMs=80\n"
     "releaseMinSpeed=1.0\n"
+    "; 최고 속도 앞뒤 이 시간(ms)의 평균 방향을 사용 (던지는 방향 안정화, 0 = 끔)\n"
+    "releaseDirWindowMs=65\n"
+    "; 보정 속도 상한: 놓는 순간 속도의 배수 (0 = 제한 없음)\n"
+    "releaseMaxRatio=0\n"
+    "; 물건을 잡는 버튼: grip | trigger\n"
+    "releaseButton=grip\n"
     "gripPress=0.7\n"
     "gripRelease=0.4\n"
+    "; 순간 튐 방지: 이보다 빠른 값(m/s)은 추적 오류로 보고 직전 값을 최대 spikeHoldMs 동안 유지\n"
+    "spikeGuard=1\n"
+    "spikeMaxSpeed=25\n"
+    "spikeHoldMs=150\n"
     "; SteamVR 손 위치 정확도\n"
     "poseLagFix=1\n"
     "poseLagMs=37\n"
@@ -77,7 +89,15 @@ const char* DEFAULT_INI =
     "; 스틱: 데드존(0~0.5), 감도 곡선(1 = 그대로, 클수록 가운데 근처가 덜 민감)\n"
     "stickTuning=0\n"
     "stickDeadzone=0.10\n"
-    "stickCurve=1.0\n";
+    "stickCurve=1.0\n"
+    "; D-pad: 왼손을 얼굴 가까이 댄 채 왼쪽 스틱을 밀면 D-pad (게임의 D-pad 입력 또는 가상 Xbox 패드, ViGEmBus 필요)\n"
+    "dpadEmulation=1\n"
+    "; gesture = 왼손을 얼굴 가까이, stick = 오른쪽 스틱을 누른 채\n"
+    "dpadTrigger=gesture\n"
+    "; D-pad 에 들어갈 때 왼손 진동\n"
+    "dpadHaptic=1\n"
+    "dpadGestureDist=0.22\n"
+    "dpadThreshold=0.5\n";
 
 std::string trim(const std::string& s) {
     const char* ws = " \t\r\n";
@@ -149,6 +169,18 @@ void SettingsFile::parse(std::istream& in, Settings& s) {
             else if (key == "vdFrameFix") s.vdFix.mode = val == "auto" ? VdFixMode::Auto : (std::stoi(val) != 0 ? VdFixMode::On : VdFixMode::Off);
             else if (key == "vdFramePitchDeg") s.vdFix.pitchDeg = std::stod(val);
             else if (key == "gripRelease") s.releaseBoost.gripRelease = std::stod(val);
+            else if (key == "vdAngularPitchDeg") s.vdFix.angularPitchDeg = std::stod(val);
+            else if (key == "releaseDirWindowMs") s.releaseBoost.directionWindowSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "releaseMaxRatio") s.releaseBoost.maxRatio = std::stod(val);
+            else if (key == "releaseButton") s.releaseBoost.button = val == "trigger" ? ReleaseButton::Trigger : ReleaseButton::Grip;
+            else if (key == "dpadEmulation") s.dpad.enabled = std::stoi(val) != 0;
+            else if (key == "dpadThreshold") s.dpad.threshold = std::stod(val);
+            else if (key == "dpadTrigger") s.dpad.gesture = val != "stick";
+            else if (key == "dpadHaptic") s.dpad.haptic = std::stoi(val) != 0;
+            else if (key == "dpadGestureDist") s.dpad.gestureDistance = std::stod(val);
+            else if (key == "spikeGuard") s.spikeGuard.enabled = std::stoi(val) != 0;
+            else if (key == "spikeMaxSpeed") s.spikeGuard.maxSpeed = std::stod(val);
+            else if (key == "spikeHoldMs") s.spikeGuard.maxHoldSec = std::stod(val) / MS_PER_SEC;
             else if (key == "poseLagFix") s.poseLagFix = std::stoi(val) != 0;
             else if (key == "poseLagMs") s.poseLagSec = std::stod(val) / MS_PER_SEC;
             else if (key == "poseLeadMs") s.poseLeadSec = std::stod(val) / MS_PER_SEC;
