@@ -13,6 +13,7 @@
 #include "ReleaseBoost.h"
 #include "Settings.h"
 #include "VdFrameFit.h"
+#include "VdHeadset.h"
 #include "VelocityEstimator.h"
 
 // 컨트롤러 action space 의 xrLocateSpace(s) 결과에서 속도를 보정한다.
@@ -80,6 +81,8 @@ private:
     SpaceVelocityFixer();
     void pollSettings();
     void applySettings();
+    void pollHeadset();
+    bool throwFixOff() const;  // D-pad 만 동작
     void logStats();
     void capture(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time);
     void closeCapture();
@@ -97,6 +100,7 @@ private:
 
     mutable std::mutex m_mutex;
     controllerfix::SettingsFile m_settingsFile;
+    controllerfix::VdHeadset m_headset;
     controllerfix::Settings m_settings;
     std::string m_appName;
     bool m_dpadHeld = false;  // 이 동안 왼쪽 스틱은 D-pad

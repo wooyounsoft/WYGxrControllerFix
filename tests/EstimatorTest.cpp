@@ -9,6 +9,7 @@
 #include "ControllerTuning.h"
 #include "VdFrameFit.h"
 #include "VdFrameFix.h"
+#include "VdHeadset.h"
 #include "VelocityEstimator.h"
 
 using namespace controllerfix;
@@ -457,6 +458,14 @@ void testDpadGesture() {
     check(!dpadGestureHeld(cfg, true, cfg.gestureDistance * 2), "dpad gesture: far releases", 0, 0);
 }
 
+void testVdHeadset() {
+    const std::string gxr = VdHeadset::parseDeviceName(R"({ "CodecName": "HEVC", "DeviceName": "Samsung Galaxy XR" })");
+    const std::string quest = VdHeadset::parseDeviceName("{\"DeviceName\":\"Meta Quest 3\"}");
+    check(gxr == "Samsung Galaxy XR" && !VdHeadset::isQuestName(gxr) && VdHeadset::isGxrName(gxr), "vd headset: GXR", 0, 0);
+    check(quest == "Meta Quest 3" && VdHeadset::isQuestName(quest) && !VdHeadset::isGxrName(quest), "vd headset: Quest", 0, 0);
+    check(VdHeadset::parseDeviceName("{}").empty() && !VdHeadset::isQuestName(""), "vd headset: unknown keeps auto", 0, 0);
+}
+
 void testSettingsParse() {
     std::istringstream in(
         "; comment\nenabled=0\nlinearScale = 1.25\nvdFrameFix=auto\nvdAngularPitchDeg=16\nreleaseButton=trigger\n"
@@ -503,6 +512,7 @@ int main() {
     testDpad();
     testDpadGesture();
     testSettingsParse();
+    testVdHeadset();
     testReleaseBoostUsesPeak();
     testReleaseBoostIgnoresOldPeakAndSlowMoves();
     testReleaseBoostIgnoresStalePeak();

@@ -103,6 +103,15 @@ void PoseFixer::initSettings() {
     m_settingsFile.reloadIfChanged(m_settings);
     applySettings();
     DriverLog("settings: %s", m_settingsFile.path().string().c_str());
+    pollHeadset();
+}
+
+void PoseFixer::pollHeadset() {
+    if (m_headset.poll()) DriverLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+}
+
+bool PoseFixer::throwFixOff() const {
+    return m_settings.vdFix.mode == controllerfix::VdFixMode::Auto && m_headset.isQuest();
 }
 
 void PoseFixer::applySettings() {
@@ -136,8 +145,8 @@ void PoseFixer::applySettings() {
               m_settings.releaseBoost.minSpeed, m_settings.releaseBoost.gripPress, m_settings.releaseBoost.gripRelease,
               m_settings.releaseBoost.directionWindowSec * MS_PER_SEC, m_settings.releaseBoost.maxRatio,
               m_settings.releaseBoost.button == controllerfix::ReleaseButton::Trigger ? "trigger" : "grip");
-    DriverLog("dpadEmulation=%d trigger=%s dist %.2f threshold %.2f", m_settings.dpad.enabled, m_settings.dpad.gesture ? "gesture" : "stick",
-              m_settings.dpad.gestureDistance, m_settings.dpad.threshold);
+    DriverLog("dpadEmulation=%d trigger=%s dist %.2f threshold %.2f", m_settings.dpad.enabled,
+              m_settings.dpad.gesture ? "gesture" : "stick", m_settings.dpad.gestureDistance, m_settings.dpad.threshold);
     DriverLog("spikeGuard=%d max %.0f m/s hold %.0f ms", m_settings.spikeGuard.enabled, m_settings.spikeGuard.maxSpeed,
               m_settings.spikeGuard.maxHoldSec * MS_PER_SEC);
     DriverLog("poseLagFix=%d %.0f ms, poseLead %.0f ms, angularOutput=%s", m_settings.poseLagFix,
@@ -155,6 +164,7 @@ void PoseFixer::tick() {
     if (now >= m_nextSettingsPoll) {
         m_nextSettingsPoll = now + SETTINGS_POLL_INTERVAL;
         if (m_settingsFile.reloadIfChanged(m_settings)) applySettings();
+        pollHeadset();
     }
     if (now >= m_nextStatsLog) {
         m_nextStatsLog = now + STATS_LOG_INTERVAL;
@@ -207,6 +217,7 @@ void PoseFixer::process(uint32_t deviceIndex, vr::DriverPose_t& pose) {
     if (dev.kind == DeviceKind::Unknown) dev.kind = classify(deviceIndex);
     if (dev.kind != DeviceKind::Target) return;
     updateDpadGesture(dev, deviceIndex, pose);
+    if (throwFixOff()) return;  // Quest: D-pad 만 동작, 포즈는 그대로
 
     if (!pose.poseIsValid || pose.result != vr::TrackingResult_Running_OK) {
         dev.estimator.reset();

@@ -8,9 +8,11 @@ Tunes Samsung **Galaxy XR** controllers for PCVR through **Virtual Desktop**: St
 
 - **Throw tuning**: throws follow your hand motion in direction and strength, in SteamVR games and VDXR games.
 - **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed (on by default).
-- **Automatic**: active for Galaxy XR only. Quest and Steam Link are left untouched.
+- **Automatic**: throw and hand fixes are for Galaxy XR only. Steam Link is left untouched.
+- **Quest 3 (D-pad gesture)**: through Virtual Desktop, Galaxy XR works internally as a Quest 3, so the same install also works on a Quest 3. On a Quest the throw fixes are left out and the D-pad gesture is supported. The headset is detected automatically, and `manager.bat` shows only the items for the connected headset.
 - **Hand position accuracy** (SteamVR games): hand position and angle match your real hand more closely.
 - **D-pad gesture**: put your left hand near your face and use the left stick as a D-pad (on by default, turn it off in `manager.bat`; the choice is kept).
+- **Switching headsets**: restart the Virtual Desktop Streamer on the PC before connecting the other headset.
 - **Optional tuning** (off by default): stronger haptics, controller angle, thumbstick deadzone/curve.
 
 ## Install
@@ -70,7 +72,7 @@ Requires Visual Studio 2022 and CMake 3.20+.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build\Release\EstimatorTest.exe
-tools\package.ps1 -Version 0.6.0
+tools\package.ps1 -Version 0.7.0
 ```
 
 ## License
@@ -85,10 +87,12 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 
 - **던지기 보정**: 던지는 방향과 세기가 손동작대로 나갑니다.
 - **놓을 때 속도 보정**: 휘두르는 정점보다 살짝 늦게 놓아도 던지는 힘이 빠지지 않습니다 (기본 켜짐).
-- **자동 판별**: Galaxy XR에서만 켜지고 Quest, Steam Link에서는 꺼집니다.
+- **자동 판별**: 던지기와 손 위치 보정은 Galaxy XR에서만 켜집니다. Steam Link는 건드리지 않습니다.
+- **Quest 3 (D-pad 제스처)**: Virtual Desktop에서 Galaxy XR은 내부적으로 Quest 3처럼 동작하므로, 같은 설치로 Quest 3에서도 쓸 수 있습니다. Quest에서는 던지기 보정을 빼고 D-pad 제스처를 지원합니다. 헤드셋은 자동으로 구분하고, `manager.bat`도 연결한 헤드셋에 맞는 항목만 보여 줍니다.
 - **VDXR 게임**: 게임에 따라 효과가 다릅니다. 손 움직임으로 던지기를 직접 계산하는 게임은 원래도 잘 되고, 그대로 둡니다.
 - **손 위치 정확도** (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
 - **D-pad 제스처**: 왼손을 얼굴 가까이 대고 왼쪽 스틱을 밀면 D-pad로 동작합니다 (기본 켜짐, `manager.bat`에서 끄면 그대로 유지).
+- **헤드셋 바꿔 쓰기**: 다른 헤드셋으로 접속하기 전에 PC의 Virtual Desktop Streamer를 재시작하세요.
 - **취향 조정** (기본 꺼짐): 진동 강화, 컨트롤러 각도 조정 (`settings.ini`), 스틱 데드존/감도 (`manager.bat`).
 
 설치: [Releases](../../releases)에서 zip을 받아 고정된 폴더에 풀고, SteamVR을 끈 상태에서 `install.bat`을 실행합니다.

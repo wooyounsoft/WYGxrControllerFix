@@ -125,6 +125,7 @@ bool SpaceVelocityFixer::onInstanceCreated(const std::string& appName, const std
     LayerLog("app='%s' runtime='%s' -> %s (openxrEnabled=%d enabled=%d vdFrameFix=%s capture=%d)", appName.c_str(),
              runtimeName.c_str(), active ? "ACTIVE" : "inactive (runtime mismatch)", m_settings.openxrEnabled,
              m_settings.enabled, vdFixModeName(m_settings.vdFix.mode), m_settings.openxrCapture);
+    pollHeadset();
     return active;
 }
 
@@ -305,10 +306,19 @@ void SpaceVelocityFixer::applySettings() {
     }
 }
 
+void SpaceVelocityFixer::pollHeadset() {
+    if (m_headset.poll()) LayerLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+}
+
+bool SpaceVelocityFixer::throwFixOff() const {
+    return m_settings.vdFix.mode == controllerfix::VdFixMode::Auto && m_headset.isQuest();
+}
+
 void SpaceVelocityFixer::pollSettings() {
     auto now = std::chrono::steady_clock::now();
     if (now < m_nextSettingsPoll) return;
     m_nextSettingsPoll = now + SETTINGS_POLL_INTERVAL;
+    pollHeadset();
     if (!m_settingsFile.reloadIfChanged(m_settings)) return;
     applySettings();
     if (!m_settings.openxrCapture) closeCapture();
@@ -465,6 +475,7 @@ void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSp
     ps.lastSampleSec = std::max(ps.lastSampleSec, sample.timeSec);
     updateDpadGesture(dispatch, space, baseSpace, time, sample.position);
     pulseDpadHaptic(dispatch, space);
+    if (throwFixOff()) return;  // Quest: D-pad 만 동작, 속도는 그대로
 
     // 1. 속도 보정
     controllerfix::VelocityEstimate out;

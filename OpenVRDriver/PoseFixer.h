@@ -11,6 +11,7 @@
 #include "ReleaseBoost.h"
 #include "Settings.h"
 #include "VdFrameFix.h"
+#include "VdHeadset.h"
 #include "VelocityEstimator.h"
 
 // VD 컨트롤러 포즈 보정: 속도 프레임, 손 위치 정확도, 각도 조정.
@@ -64,6 +65,8 @@ private:
     void onGripValue(vr::VRInputComponentHandle_t handle, double value, double timeOffset);
     static bool isHand(vr::PropertyContainerHandle_t container, vr::ETrackedControllerRole role);
     bool dpadActive() const;
+    void pollHeadset();
+    bool throwFixOff() const;  // D-pad 만 동작
     void setDpadHeld(bool held);
     void updateDpadGesture(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose);
     void logFrameInfo(DeviceState& dev, uint32_t deviceIndex, const vr::DriverPose_t& pose);
@@ -103,6 +106,7 @@ private:
     bool m_hasHead = false;
     std::map<vr::PropertyContainerHandle_t, uint32_t> m_containerToDevice;
     controllerfix::SettingsFile m_settingsFile;
+    controllerfix::VdHeadset m_headset;
     controllerfix::Settings m_settings;
     // 마지막으로 대상 판별에 쓴 조건 (바뀔 때만 다시 판별)
     std::string m_classifiedModelMatch;

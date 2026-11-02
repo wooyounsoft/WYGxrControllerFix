@@ -1,4 +1,4 @@
-﻿WYGxrControllerFix v0.6.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
+﻿WYGxrControllerFix v0.7.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
 =====================================================================
 
 [무엇을 하나요]
@@ -11,7 +11,11 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
           (VDXR 게임은 게임에 따라 효과가 다릅니다. 손 움직임으로 던지기를
            직접 계산하는 게임은 원래도 잘 되고, 그대로 둡니다)
   - 자동 판별: 필요한 기기(Galaxy XR)에만 적용하고,
-    Quest / Steam Link 에서는 스스로 꺼집니다.
+    Steam Link 에서는 스스로 꺼집니다.
+  - Quest 3: VD에서 Galaxy XR은 내부적으로 Quest 3처럼 동작하므로 같은 설치로 Quest 3에서도
+    쓸 수 있습니다. Quest에서는 던지기 보정을 빼고 D-pad 제스처를 지원합니다.
+    헤드셋은 자동으로 구분하고, manager.bat 도 연결한 헤드셋에 맞는 항목만 보여 줍니다.
+    헤드셋을 바꿔 쓸 때는 다른 헤드셋으로 접속하기 전에 PC의 VD Streamer를 재시작하세요.
     (판별 전 처음 몇 초는 보정을 적용한 상태로 시작합니다.
      VDXR 게임은 휘두르는 동안 보정을 조금씩 더 정밀하게 다듬습니다)
   - 손 위치 정확도 (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
@@ -109,7 +113,10 @@ Also: more accurate hand position in SteamVR games,
 and optional tuning (off by default): stronger haptics, controller angle,
 thumbstick deadzone/curve (settings.ini; stick tuning also in manager.bat).
 Auto-detection: the fix turns itself off on devices that don't need it
-(Quest via VD, Steam Link). Lighthouse controllers are not touched.
+(Steam Link). Lighthouse controllers are not touched.
+Quest 3: through VD, Galaxy XR works internally as a Quest 3, so the same install also works
+on a Quest 3: throw fixes are left out and the D-pad gesture is supported. The headset is
+detected automatically. When switching headsets, restart the VD Streamer first.
 If you also use the Galaxy XR driver for Steam Link (GalaxyXR-Driver, GalaxyXRNative),
 turn it off while playing through Virtual Desktop (SteamVR Settings > Startup/Shutdown >
 Manage Add-ons); it also hooks into VD sessions and throws can feel off.

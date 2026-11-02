@@ -9,12 +9,13 @@ $LayerLog = Join-Path $DataDir 'openxr_layer.log'
 $SettingsFile = Join-Path $DataDir 'settings.ini'
 $PathsFile = Join-Path $env:LOCALAPPDATA 'openvr\openvrpaths.vrpath'
 $LogTag = '[WYGxrControllerFix]'
+$VdSettingsFile = Join-Path $env:ProgramData 'Virtual Desktop\StreamerSettings.json'
 $FixOn = 'fix ON'
 $FixOff = 'fix OFF'
 
 # 메뉴에서 바꿀 수 있는 설정 (키, 기본값, 이름)
 # Params: 값 설정 (키, 기본값, 이름, 최소, 최대)
-$Toggles = [ordered]@{
+$GxrToggles = [ordered]@{
     '1'  = @{ Key = 'enabled';       Default = '1'; Name = '전체 보정 / all fixes' }
     '2'  = @{ Key = 'openxrEnabled'; Default = '1'; Name = 'VDXR 게임 보정 / VDXR games' }
     '3'  = @{ Key = 'releaseBoost';  Default = '1'; Name = '놓을 때 속도 보정 / release boost' }
@@ -25,6 +26,22 @@ $Toggles = [ordered]@{
               Params = @(@{ Key = 'stickDeadzone'; Default = '0.10'; Name = '데드존 / deadzone'; Min = 0; Max = 0.5 },
                          @{ Key = 'stickCurve'; Default = '1.0'; Name = '감도 곡선 (1 = 그대로) / curve (1 = linear)'; Min = 0.5; Max = 3.0 }) }
 }
+# Quest 는 던지기 보정이 꺼져 있어 D-pad 만 보여 준다
+$QuestToggles = [ordered]@{
+    '1' = @{ Key = 'dpadEmulation'; Default = '1'; Name = 'D-pad: 왼손을 얼굴에 대고 왼쪽 스틱 / left hand at face + left stick' }
+    '2' = @{ Key = 'dpadHaptic';    Default = '1'; Name = 'D-pad 진동 (VDXR) / D-pad haptic (VDXR)' }
+}
+
+# VD 에 마지막으로 접속한 실제 기기 이름
+function Get-Headset {
+    if (-not (Test-Path $VdSettingsFile)) { return '' }
+    $text = Get-Content $VdSettingsFile -Raw -Encoding UTF8
+    if ($text -match '"DeviceName"\s*:\s*"([^"]*)"') { return $Matches[1] }
+    return ''
+}
+
+function Test-Quest { return (Get-Headset) -like '*Quest*' }
+function Get-Toggles { if (Test-Quest) { return $QuestToggles } return $GxrToggles }
 
 function Show([bool]$ok, [string]$text) {
     if ($ok) { Write-Host "  [OK]  $text" -ForegroundColor Green }
@@ -56,7 +73,7 @@ function LastVerdicts([string[]]$lines) {
     $last = [ordered]@{}
     foreach ($line in $lines) {
         if (-not ($line.Contains($FixOn) -or $line.Contains($FixOff))) { continue }
-        if ($line -match '(device \d+|left hand|right hand)') { $last[$Matches[1]] = $line }
+        if ($line -match '(device \d+|left hand|right hand|VD headset)') { $last[$Matches[1]] = $line }
     }
     return $last.Values
 }
@@ -73,7 +90,7 @@ function Show-DriverHealth([string[]]$lines) {
     if ($stats.Count -eq 0) { return }
     $verdictOff = @($lines | Where-Object { $_.Contains($FixOff) }).Count -gt 0
     $replaced = ($stats | ForEach-Object { if ($_ -match 'replaced (\d+) poses') { [int64]$Matches[1] } } | Measure-Object -Maximum).Maximum
-    if ($replaced -eq 0 -and -not $verdictOff) { Show $false '컨트롤러에 보정이 적용되지 않았습니다 / no poses were fixed' }
+    if ($replaced -eq 0 -and -not $verdictOff -and -not (Test-Quest)) { Show $false '컨트롤러에 보정이 적용되지 않았습니다 / no poses were fixed' }
     elseif ($failed.Count -eq 0) { Show $true "포즈 처리 정상 / poses fixed: $replaced" }
 }
 
@@ -98,6 +115,7 @@ function Show-VelocityUse([string[]]$lines) {
 function Show-Status {
     Write-Host ''
     Write-Host 'WYGxrControllerFix 관리 / manager' -ForegroundColor Cyan
+    Write-Host "VD 기기 / VD headset: $(Get-Headset)"
 
     # SteamVR 애드온
     Write-Host ''
@@ -165,9 +183,11 @@ function Show-Status {
 function Show-Menu {
     Write-Host ''
     Write-Host 'WYGxrControllerFix' -ForegroundColor Cyan
+    Write-Host "VD 기기 / VD headset: $(Get-Headset)"
     Write-Host ''
-    foreach ($k in $Toggles.Keys) {
-        $t = $Toggles[$k]
+    $toggles = Get-Toggles
+    foreach ($k in $toggles.Keys) {
+        $t = $toggles[$k]
         $on = (Get-Setting $t.Key $t.Default) -ne '0'
         $state = if ($on) { 'ON' } else { 'OFF' }
         Write-Host ("  {0}. [{1,-3}] {2}" -f $k, $state, $t.Name) -ForegroundColor $(if ($on) { 'Green' } else { 'DarkGray' })
@@ -218,8 +238,8 @@ while ($true) {
         Clear-Host
         Show-Status
         [void](Read-Host 'Enter')
-    } elseif ($Toggles.Contains($choice)) {
-        $t = $Toggles[$choice]
+    } elseif ((Get-Toggles).Contains($choice)) {
+        $t = (Get-Toggles)[$choice]
         if ($t['Params']) { Edit-Item $t } else { Toggle-Item $t }
     }
 }
