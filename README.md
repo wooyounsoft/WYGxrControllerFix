@@ -75,6 +75,10 @@ build\Release\EstimatorTest.exe
 tools\package.ps1 -Version 0.7.0
 ```
 
+## Support
+
+If this tool helps you, you can support it with a donation: [PayPal](https://paypal.me/wooyounsoft)
+
 ## License
 
 MIT. Third-party: MinHook (BSD 2-Clause), ViGEmClient (MIT), ViGEmBus installer (BSD 3-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0).
@@ -105,3 +109,5 @@ Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. Stea
 Virtual Desktop 세션에도 개입해서 던지기가 어색해질 수 있습니다. Steam Link으로 할 때 다시 켜면 됩니다.
 `galaxyxr_driver_mode.bat` (zip 안에 있음, [따로 받기](packaging/galaxyxr_driver_mode.bat))을 실행하면
 SteamVR을 종료하고 VD 모드(드라이버 끔) / Steam Link 모드(드라이버 켬)를 바로 바꿔 줍니다.
+
+**후원**: 도움이 되셨다면 [PayPal](https://paypal.me/wooyounsoft)로 후원하실 수 있습니다.
