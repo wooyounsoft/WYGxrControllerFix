@@ -77,7 +77,7 @@ tools\package.ps1 -Version 0.7.0
 
 ## Support
 
-If this tool helps you, you can support it with a donation: [PayPal](https://paypal.me/wooyounsoft)
+If this tool helps you, buy me a coffee: **[$3 via PayPal](https://paypal.me/wooyounsoft/3USD)**. Any amount is welcome, and it stays free either way.
 
 ## License
 
@@ -110,4 +110,4 @@ Virtual Desktop 세션에도 개입해서 던지기가 어색해질 수 있습�
 `galaxyxr_driver_mode.bat` (zip 안에 있음, [따로 받기](packaging/galaxyxr_driver_mode.bat))을 실행하면
 SteamVR을 종료하고 VD 모드(드라이버 끔) / Steam Link 모드(드라이버 켬)를 바로 바꿔 줍니다.
 
-**후원**: 도움이 되셨다면 [PayPal](https://paypal.me/wooyounsoft)로 후원하실 수 있습니다.
+**후원**: 도움이 되셨다면 커피 한 잔 사 주세요: **[PayPal로 $3 후원](https://paypal.me/wooyounsoft/3USD)**. 금액은 자유이고, 후원과 상관없이 계속 무료입니다.
