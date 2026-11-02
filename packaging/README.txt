@@ -132,5 +132,8 @@ it also shows whether the game requests the runtime's velocity or never asks for
   releaseBoost=0|1 (default 1: holds the peak speed of the last 150 ms for 60 ms
   after grip release; tune with releasePeakMs / releaseHoldMs).
 
+후원 / Support: 도움이 되셨다면 커피 한 잔 ($3) / buy me a coffee ($3):
+  https://paypal.me/wooyounsoft/3USD  (금액 자유, 계속 무료 / any amount, stays free)
+
 License: MIT (LICENSE.txt)
 Third-party: MinHook (BSD 2-Clause), ViGEmClient (MIT), ViGEmBus installer (BSD 3-Clause), OpenVR headers (BSD 3-Clause), OpenXR headers (Apache 2.0) - see licenses\
