@@ -28,7 +28,11 @@ struct Settings {
     bool blendEnabled = true;
     EstimatorConfig estimator;
     BlendConfig blend;
-    ReleaseBoostConfig releaseBoost;
+    ReleaseBoostConfig releaseBoost;  // minLookbackSec 는 SteamVR 드라이버용
+    // VDXR(OpenXR 레이어) 전용 해제 기준 앞당김. SteamVR 은 VD 속도가 손보다 앞서 20 ms 가 도움이 됐지만,
+    // VDXR(Titanfall)에서는 일찍 놓을 때 궤적 앞쪽 방향이 들어가 0 이 더 나았다 (2026-11-03)
+    static constexpr double DEFAULT_OPENXR_RELEASE_LOOKBACK_SEC = 0.0;
+    double openxrReleaseLookbackSec = DEFAULT_OPENXR_RELEASE_LOOKBACK_SEC;
     VdFrameFixConfig vdFix;  // 켜면 추정값 대신 VD 속도를 정확히 역변환해서 사용
     static constexpr double DEFAULT_POSE_LAG_SEC = 0.037;  // 실측 35~39 ms
     bool poseLagFix = true;  // SteamVR 손 위치 정확도 (보정 속도로 위치/회전 다시 맞춤)

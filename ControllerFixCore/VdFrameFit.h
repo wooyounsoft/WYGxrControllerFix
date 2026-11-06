@@ -1,10 +1,14 @@
 #pragma once
 
 #include <deque>
+#include <vector>
 
 #include "VelocityEstimator.h"
 
 namespace controllerfix {
+
+// Horn 방법: Σ target·(q·source) 를 최대로 하는 회전 q. 반환값 = 그 합.
+double bestRotation(const std::vector<Vec3>& source, const std::vector<Vec3>& target, Quat& q);
 
 // 속도 프레임 보정을 실제 움직임(포즈 변화)으로 다듬는다.
 //   v_world = R · B · v_reported   (R = 공간 포즈 회전, B = 고정 회전)

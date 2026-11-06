@@ -10,6 +10,7 @@
 #include "ControllerTuning.h"
 #include "ReleaseBoost.h"
 #include "Settings.h"
+#include "VdFrameCalibrator.h"
 #include "VdFrameFix.h"
 #include "VdHeadset.h"
 #include "VelocityEstimator.h"
@@ -107,6 +108,12 @@ private:
     std::map<vr::PropertyContainerHandle_t, uint32_t> m_containerToDevice;
     controllerfix::SettingsFile m_settingsFile;
     controllerfix::VdHeadset m_headset;
+    controllerfix::VdFrameCalibrator m_calibrator;  // 양손 공용: 세션별 속도 프레임 자동 보정
+    uint64_t m_loggedCalibration = 0;
+    void feedCalibrator(uint32_t deviceIndex, const vr::DriverPose_t& original);
+    void logCalibration(const char* reason);
+    controllerfix::Quat linearFrame() const;
+    controllerfix::Quat angularFrame() const;
     controllerfix::Settings m_settings;
     // 마지막으로 대상 판별에 쓴 조건 (바뀔 때만 다시 판별)
     std::string m_classifiedModelMatch;

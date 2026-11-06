@@ -105,8 +105,9 @@ struct VdPose {
 };
 
 struct VdPoseConfig {
-    double pitchDeg = 0;
-    double angularPitchDeg = 0;
+    Quat linearFrame;   // 선속도/가속도 B (v_world = R · B · v)
+    Quat angularFrame;  // 각속도 B
+    double frameUndoLagSec = 0;  // VD 외삽 시간: 속도 변환 기준 회전을 외삽 전 회전으로 (0 = DriverPose 회전 그대로)
     double poseLagSec = 0;   // 0 = 끔
     double poseLeadSec = 0;  // 0 = 끔
     double linearScale = 1;

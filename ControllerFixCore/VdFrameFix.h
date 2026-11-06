@@ -14,11 +14,13 @@ namespace controllerfix {
 enum class VdFixMode { Off, On, Auto };
 
 struct VdFrameFixConfig {
-    static constexpr double DEFAULT_PITCH_DEG = 13.0;  // 실측 12.1~13.5° (양손, 선속도/각속도 공통)
+    static constexpr double DEFAULT_PITCH_DEG = 15.0;  // 실측 X 13~16° (2026-10-24, 11-03 공통). 세션마다 다른 값은 autoCalibrate 가 맞춘다
 
     VdFixMode mode = VdFixMode::Auto;
     double pitchDeg = DEFAULT_PITCH_DEG;
-    double angularPitchDeg = DEFAULT_PITCH_DEG;  // 각속도 전용 (캡처 최적값 15~16°, 오차 차이는 1° 미만)
+    double angularPitchDeg = DEFAULT_PITCH_DEG;  // 각속도 전용
+    bool undoLagFrame = true;   // 속도 변환에 VD 외삽 전 회전을 쓴다 (0 = v0.7.0 까지처럼 DriverPose 회전)
+    bool autoCalibrate = true;  // 손 움직임으로 세션마다 3축 틀어짐을 맞춘다 (맞추기 전에는 위 pitch)
 };
 
 // 실제 속도(포즈 변화로 추정)와 비교해서 원래 속도와 보정 속도 중 어느 쪽이 맞는지 투표로 판별한다.
@@ -44,6 +46,12 @@ private:
     std::deque<bool> m_votes;  // true = 보정 쪽이 맞음
     Verdict m_verdict = Verdict::Undecided;
 };
+
+// X축 pitch 회전 (B 의 기본값)
+Quat vdPitchFrame(double pitchDeg);
+
+// v_world = R · B · v_reported
+Vec3 vdLocalToWorld(const Quat& poseRotation, const Vec3& reported, const Quat& frame);
 
 // poseRotation: 원본 포즈 회전 (DriverPose_t::qRotation)
 Vec3 vdLocalToWorld(const Quat& poseRotation, const Vec3& reported, double pitchDeg);

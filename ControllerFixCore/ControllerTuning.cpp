@@ -91,9 +91,17 @@ void leadPose(double leadSec, const Vec3& linear, const Vec3& angular, Vec3& pos
 
 VdPose fixVdPose(const VdPose& reported, const VdPoseConfig& config) {
     VdPose out = reported;
-    out.linear = vdLocalToWorld(reported.rotation, reported.linear, config.pitchDeg);
-    out.acceleration = vdLocalToWorld(reported.rotation, reported.acceleration, config.pitchDeg);
-    Vec3 angularWorld = vdDriverAngularToWorld(reported.rotation, reported.angular, config.angularPitchDeg);
+    // 보고 속도는 VD 가 뒤로 외삽하기 전 회전 기준이다 → 외삽을 되돌린 회전으로 변환한다 (빠른 손목 동작에서 수 도 차이)
+    Vec3 angularLabeled = rotate(reported.rotation, reported.angular);
+    Quat frameRotation = reported.rotation;
+    if (config.frameUndoLagSec != 0) {
+        double lag = config.frameUndoLagSec;
+        frameRotation = normalized(multiply(fromRotationVector({lag * angularLabeled.x, lag * angularLabeled.y, lag * angularLabeled.z}),
+                                            reported.rotation));
+    }
+    out.linear = vdLocalToWorld(frameRotation, reported.linear, config.linearFrame);
+    out.acceleration = vdLocalToWorld(frameRotation, reported.acceleration, config.linearFrame);
+    Vec3 angularWorld = vdLocalToWorld(frameRotation, angularLabeled, config.angularFrame);
     if (config.poseLagSec != 0)
         correctPoseLag(config.poseLagSec, reported.linear, out.linear, rotate(reported.rotation, reported.angular), angularWorld,
                        out.position, out.rotation);

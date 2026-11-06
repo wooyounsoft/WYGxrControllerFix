@@ -78,6 +78,8 @@ double largestEigen(double a[QUAT_DIM][QUAT_DIM], double vec[QUAT_DIM]) {
     return a[best][best];
 }
 
+}  // namespace
+
 // Horn 방법: Σ target·(q·source) 를 최대로 하는 회전 q. 반환값 = 그 합.
 double bestRotation(const std::vector<Vec3>& source, const std::vector<Vec3>& target, Quat& q) {
     double s[3][3] = {};
@@ -98,8 +100,6 @@ double bestRotation(const std::vector<Vec3>& source, const std::vector<Vec3>& ta
     q = {e[0], e[1], e[2], e[3]};
     return score;
 }
-
-}  // namespace
 
 VdFrameFit::VdFrameFit(double priorPitchDeg) { setPriorPitch(priorPitchDeg); }
 

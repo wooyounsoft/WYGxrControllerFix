@@ -4,6 +4,7 @@ add_library(ControllerFixCore STATIC
     ReleaseBoost.cpp
     VdFrameFix.cpp
     VdFrameFit.cpp
+    VdFrameCalibrator.cpp
     VdHeadset.cpp
     ControllerTuning.cpp
 )

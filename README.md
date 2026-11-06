@@ -7,7 +7,8 @@ Tunes Samsung **Galaxy XR** controllers for PCVR through **Virtual Desktop**: St
 ## Features
 
 - **Throw tuning**: throws follow your hand motion in direction and strength, in SteamVR games and VDXR games.
-- **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed (on by default).
+- **Release boost**: letting go slightly after the peak of your swing keeps the throw's speed and direction (on by default).
+- **Auto calibration**: the correction is measured from your normal hand movement in the first few seconds of each session, in SteamVR and VDXR games (on by default).
 - **Automatic**: throw and hand fixes are for Galaxy XR only. Steam Link is left untouched.
 - **Quest 3 (D-pad gesture)**: through Virtual Desktop, Galaxy XR works internally as a Quest 3, so the same install also works on a Quest 3. On a Quest the throw fixes are left out and the D-pad gesture is supported. The headset is detected automatically, and `manager.bat` shows only the items for the connected headset.
 - **Hand position accuracy** (SteamVR games): hand position and angle match your real hand more closely.
@@ -33,11 +34,14 @@ Settings: `%LOCALAPPDATA%\WYGxrControllerFix\settings.ini` (applied live while a
 | `releaseBoost` | `1` | keep throw speed after grip release |
 | `releasePeakMs` / `releaseHoldMs` | `150` / `60` | release boost window / hold time |
 | `releaseMaxPeakAgeMs` | `80` | skip the boost when the peak is older than this (stop, then place) |
-| `releaseDirWindowMs` | `65` | average the throw direction over this window (`0` = off) |
+| `releaseFastRatio` | `0.85` | the boost uses the last moment the hand was at least this fraction of its peak speed (speed and direction) |
+| `releaseLookbackMs` / `openxrReleaseLookbackMs` | `20` / `0` | look this far before the release (SteamVR games / VDXR games) |
+| `releaseDirWindowMs` / `releaseDirArcDeg` | `30` / `6` | throw direction is averaged over a short window that shrinks for faster throws (max ms / arc in degrees; `0` = off) |
 | `releaseMaxRatio` | `0` | limit the boost to this multiple of the release speed (`0` = no limit) |
 | `releaseButton` | `grip` | button that holds objects: `grip` or `trigger` |
 | `spikeGuard` / `spikeMaxSpeed` / `spikeHoldMs` | `1` / `25` / `150` | ignore sudden tracking jumps |
-| `vdAngularPitchDeg` | `13` | wrist-rotation correction angle |
+| `vdAngularPitchDeg` | `15` | wrist-rotation correction angle (used until auto calibration finishes) |
+| `vdAutoCalibrate` | `1` | measure the correction from normal hand movement each session (a few seconds) |
 | `dpadEmulation` / `dpadThreshold` | `1` / `0.5` | left hand near your face + left stick = D-pad: the game's own D-pad input, or a virtual Xbox pad (ViGEmBus, included). Turns itself off in UEVR games |
 | `dpadHaptic` | `1` | short left-hand vibration when the D-pad turns on (VDXR games) |
 | `dpadTrigger` / `dpadGestureDist` | `gesture` / `0.22` | `gesture` or `stick` (hold right stick click) / hand-to-head distance in m |
@@ -72,7 +76,7 @@ Requires Visual Studio 2022 and CMake 3.20+.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 build\Release\EstimatorTest.exe
-tools\package.ps1 -Version 0.7.0
+tools\package.ps1 -Version 0.8.0
 ```
 
 ## Support
@@ -90,7 +94,8 @@ MIT. Third-party: MinHook (BSD 2-Clause), ViGEmClient (MIT), ViGEmBus installer 
 Galaxy XR 컨트롤러를 Virtual Desktop 환경에 맞게 다듬습니다. SteamVR 게임과 VDXR 게임 모두 적용됩니다.
 
 - **던지기 보정**: 던지는 방향과 세기가 손동작대로 나갑니다.
-- **놓을 때 속도 보정**: 휘두르는 정점보다 살짝 늦게 놓아도 던지는 힘이 빠지지 않습니다 (기본 켜짐).
+- **놓을 때 속도 보정**: 휘두르는 정점보다 살짝 늦게 놓아도 던지는 힘과 방향이 흐트러지지 않습니다 (기본 켜짐).
+- **자동 보정**: 접속할 때마다 처음 몇 초 동안의 평소 손 움직임으로 보정값을 스스로 맞춥니다. SteamVR, VDXR 게임 모두 적용 (기본 켜짐).
 - **자동 판별**: 던지기와 손 위치 보정은 Galaxy XR에서만 켜집니다. Steam Link는 건드리지 않습니다.
 - **Quest 3 (D-pad 제스처)**: Virtual Desktop에서 Galaxy XR은 내부적으로 Quest 3처럼 동작하므로, 같은 설치로 Quest 3에서도 쓸 수 있습니다. Quest에서는 던지기 보정을 빼고 D-pad 제스처를 지원합니다. 헤드셋은 자동으로 구분하고, `manager.bat`도 연결한 헤드셋에 맞는 항목만 보여 줍니다.
 - **VDXR 게임**: 게임에 따라 효과가 다릅니다. 손 움직임으로 던지기를 직접 계산하는 게임은 원래도 잘 되고, 그대로 둡니다.

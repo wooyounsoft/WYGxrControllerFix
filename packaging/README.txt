@@ -1,4 +1,4 @@
-﻿WYGxrControllerFix v0.7.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
+﻿WYGxrControllerFix v0.8.0 - Galaxy XR + Virtual Desktop 컨트롤러 보정
 =====================================================================
 
 [무엇을 하나요]
@@ -18,6 +18,8 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
     헤드셋을 바꿔 쓸 때는 다른 헤드셋으로 접속하기 전에 PC의 VD Streamer를 재시작하세요.
     (판별 전 처음 몇 초는 보정을 적용한 상태로 시작합니다.
      VDXR 게임은 휘두르는 동안 보정을 조금씩 더 정밀하게 다듬습니다)
+  - 자동 보정: 접속할 때마다 처음 몇 초 동안의 평소 손 움직임으로 보정값을
+    스스로 맞춥니다 (SteamVR, VDXR 게임 모두, 기본 켜짐).
   - 손 위치 정확도 (SteamVR 게임): 손 위치와 각도가 실제 손에 더 가깝게 맞습니다.
   - 취향 조정 (기본 꺼짐, settings.ini 또는 manager.bat):
       진동 강화 / 컨트롤러 각도 조정 / 스틱 데드존과 감도
@@ -54,20 +56,25 @@ Galaxy XR 컨트롤러를 Virtual Desktop(VD) 환경에 맞게 보정해서
   vdFrameFix=auto        auto = 자동 판별 (권장), 1 = 항상 적용, 0 = 끄기
   linearScale            던지는 힘 배율 (기본 1.0). 너무 세게 느껴지면 0.85~0.9
   angularScale           손목 회전 배율 (기본 1.0)
-  releaseBoost=0/1       놓는 순간 직전 최고 속도를 잠깐 유지 (기본 켜짐).
-                         최고 속도보다 조금 늦게 놓아도 힘이 빠지지 않게 합니다.
-                         너무 세게 느껴지면 0 으로 끄세요.
-  releasePeakMs=150      놓기 직전 이 시간(ms) 안의 최고 속도를 사용
-  releaseHoldMs=60       놓은 뒤 이 시간(ms) 동안 최고 속도를 유지
+  releaseBoost=0/1       놓는 순간, 직전에 충분히 빨랐던 순간의 속도와 방향을 잠깐 유지
+                         (기본 켜짐). 최고 속도보다 조금 늦게 놓아도 힘과 방향이
+                         흐트러지지 않게 합니다. 너무 세게 느껴지면 0 으로 끄세요.
+  releasePeakMs=150      놓기 직전 이 시간(ms) 안의 움직임을 사용
+  releaseHoldMs=60       놓은 뒤 이 시간(ms) 동안 그 속도를 유지
                          힘이 아직 빠지면 200~300 / 80~100 으로 늘려 보세요.
+  releaseFastRatio=0.85  최고 속도의 이 비율 이상이던 마지막 순간을 사용
+  releaseLookbackMs=20   놓기 이 시간(ms) 전부터 찾음, SteamVR 게임
+  openxrReleaseLookbackMs=0  위와 같음, VDXR 게임
   releaseMaxPeakAgeMs=80 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 적용 안 함
                          (휘두른 뒤 멈췄다가 내려놓을 때 물건이 튀어 나가지 않게)
-  releaseDirWindowMs=65  던지는 방향을 이 시간(ms) 평균으로 안정화 (0 = 끔)
+  releaseDirWindowMs=30  던지는 방향을 짧은 구간 평균으로 안정화 (최대 ms, 0 = 끔)
+  releaseDirArcDeg=6     빠르게 던질수록 그 구간을 짧게 (손이 도는 각도 기준)
   releaseMaxRatio=0      놓는 순간 속도의 이 배수까지만 보정 (0 = 제한 없음)
   releaseButton=grip     물건을 잡는 버튼 (grip | trigger). 트리거로 잡는 게임은 trigger
   spikeGuard=0/1         추적이 순간적으로 튈 때 직전 값 유지 (기본 켜짐),
                          spikeMaxSpeed=25 (m/s), spikeHoldMs=150
-  vdAngularPitchDeg=13   손목 회전 보정 각도
+  vdAngularPitchDeg=15   손목 회전 보정 각도 (자동 보정이 끝나기 전까지 사용)
+  vdAutoCalibrate=1      접속할 때마다 평소 손 움직임으로 보정 각도를 자동으로 맞춤 (몇 초)
   dpadEmulation=0/1      왼손을 얼굴 가까이 댄 채 왼쪽 스틱을 밀면 D-pad (기본 켜짐,
                          manager.bat 에서 끄면 다음 실행에도 유지)
                          그동안 게임에는 왼쪽 스틱을 놓은 것으로 보냅니다.
@@ -129,8 +136,12 @@ Manager: run manager.bat to see the status (registration, whether the fix was ac
 last game) and to turn the fixes on/off (applies within 1 s, even in game). For the last VDXR game
 it also shows whether the game requests the runtime's velocity or never asks for it.
   vdFrameFix=auto|1|0, linearScale (default 1.0),
-  releaseBoost=0|1 (default 1: holds the peak speed of the last 150 ms for 60 ms
-  after grip release; tune with releasePeakMs / releaseHoldMs).
+  releaseBoost=0|1 (default 1: after grip release, holds the speed and direction of the
+  last fast moment of the swing for 60 ms; tune with releasePeakMs / releaseHoldMs /
+  releaseFastRatio / releaseLookbackMs / openxrReleaseLookbackMs / releaseDirWindowMs /
+  releaseDirArcDeg).
+  vdAutoCalibrate=0|1 (default 1: the correction is measured from normal hand movement
+  in the first few seconds of each session; vdAngularPitchDeg=15 is used until then).
 
 후원 / Support: 도움이 되셨다면 커피 한 잔 ($3) / buy me a coffee ($3):
   https://paypal.me/wooyounsoft/3USD  (금액 자유, 계속 무료 / any amount, stays free)

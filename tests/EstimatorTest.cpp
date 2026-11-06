@@ -1,5 +1,6 @@
 // VelocityEstimator 검증: 해석적으로 속도를 아는 궤적에서 추정값 비교
 #include <cmath>
+#include <iterator>
 #include <cstdio>
 #include <sstream>
 
@@ -7,6 +8,7 @@
 #include "ReleaseBoost.h"
 #include "Settings.h"
 #include "ControllerTuning.h"
+#include "VdFrameCalibrator.h"
 #include "VdFrameFit.h"
 #include "VdFrameFix.h"
 #include "VdHeadset.h"
@@ -375,7 +377,7 @@ void testScaleDoesNotMoveHand() {
     constexpr double LAG = 0.037;
     VdPose reported{{0.1, 1.2, -0.3}, yawQuat(0.4), {1.0, -2.0, 0.5}, {3.0, 1.0, -2.0}, {}};
     VdPoseConfig cfg;
-    cfg.pitchDeg = cfg.angularPitchDeg = VdFrameFixConfig::DEFAULT_PITCH_DEG;
+    cfg.linearFrame = cfg.angularFrame = vdPitchFrame(VdFrameFixConfig::DEFAULT_PITCH_DEG);
     cfg.poseLagSec = LAG;
     VdPose base = fixVdPose(reported, cfg);
     cfg.linearScale = cfg.angularScale = STRONG;
@@ -417,8 +419,109 @@ void testReleaseDirectionAveraged() {
     boost.override(STEP * 4, out);
     double speed = length3(out.linear.x, out.linear.y, out.linear.z);
     double spikeAngle = 45.0, angle = std::atan2(out.linear.y, out.linear.x) * 180.0 / 3.14159265358979323846;
-    check(fired && angle < spikeAngle / 2, "release direction averaged", angle, 0);
+    check(fired && angle < spikeAngle * 0.8, "release direction averaged", angle, 0);  // 빠를수록 구간이 짧아 덜 섞임
     check(std::fabs(speed - ev.peakSpeed) < 1e-9, "release keeps peak speed", speed, ev.peakSpeed);
+}
+
+
+// 그립 판정이 늦은 경우: 최고 속도 지점이 아니라 감속 직전 "아직 빨랐던 마지막 순간"의 세기와 방향을 쓴다
+void testReleaseUsesLastFastMoment() {
+    constexpr double STEP = 0.0154;
+    ReleaseBoost boost;
+    ReleaseBoostConfig cfg;
+    boost.setConfig(cfg);
+    ReleaseEvent ev;
+    boost.updateGrip(0.0, GRIP_HELD, ev);
+    double t = STEP;
+    boost.addVelocity(t, {{0, 8.0, 0}, {}});  // 최고 속도, 아직 위로 휘두르는 중
+    t += STEP;
+    boost.addVelocity(t, {{5.0, 5.0, 0}, {}});  // 약 7.1 m/s (0.88), 앞으로 꺾임
+    t += STEP;
+    boost.addVelocity(t, {{7.0, 0, 0}, {}});  // 7.0 m/s (0.875), 앞으로 = 실제로 놓은 순간
+    t += STEP;
+    boost.addVelocity(t, {{3.0, -2.0, 0}, {}});  // 감속하며 아래로 (그립 판정이 늦게 온 시점)
+    bool fired = boost.updateGrip(t, GRIP_OPEN, ev);
+    VelocityEstimate out;
+    boost.override(t, out);
+    double angle = std::atan2(out.linear.y, out.linear.x) * 180.0 / 3.14159265358979323846;
+    constexpr double FORWARD_TOLERANCE_DEG = 25.0;  // 방향 평균에 앞 샘플이 조금 섞임
+    check(fired && std::fabs(angle) < FORWARD_TOLERANCE_DEG, "release uses last fast moment direction", angle, 0);
+    check(fired && std::fabs(ev.peakAgeSec - STEP) < 1e-9, "release looks back only to the last fast moment", ev.peakAgeSec, STEP);
+
+    // 제때 놓은 경우: lookback 0 이면 그대로, 기본값이면 약 20 ms 앞 속도 (Steam Link 처럼)
+    ReleaseBoostConfig noLookback = cfg;
+    noLookback.minLookbackSec = 0;
+    ReleaseBoost onTime;
+    onTime.setConfig(noLookback);
+    onTime.updateGrip(0.0, GRIP_HELD, ev);
+    onTime.addVelocity(STEP, linearVelocity(8.0));
+    onTime.addVelocity(STEP * 2, linearVelocity(7.5));
+    check(!onTime.updateGrip(STEP * 2, GRIP_OPEN, ev), "release on time (no lookback) -> no override", ev.currentSpeed, 7.5);
+
+    ReleaseBoost lookback;
+    lookback.setConfig(cfg);
+    lookback.updateGrip(0.0, GRIP_HELD, ev);
+    lookback.addVelocity(STEP, {{8.0, 1.0, 0}, {}});      // 약 20 ms 전: 아직 조금 위로
+    lookback.addVelocity(STEP * 2, {{7.5, -1.5, 0}, {}});  // 놓는 순간: 벌써 아래로 꺾임
+    bool fired2 = lookback.updateGrip(STEP * 2, GRIP_OPEN, ev);
+    lookback.override(STEP * 2, out);
+    check(fired2 && out.linear.y > 0 && std::fabs(ev.peakAgeSec - STEP) < 1e-9, "release on time uses ~20 ms earlier velocity", ev.peakAgeSec, STEP);
+}
+
+
+// 방향 평균 구간은 속도에 반비례 (빠른 던지기는 곡선이 빨리 돌아서 짧게)
+void testReleaseDirectionWindowShrinksWhenFast() {
+    constexpr double STEP = 0.0154;
+    ReleaseBoostConfig cfg;
+    ReleaseEvent ev;
+    VelocityEstimate out;
+    // 9 m/s: 구간 ≈ 14 ms → 앞 샘플(15 ms 전, 45° 위)은 섞이지 않는다
+    ReleaseBoost fast;
+    fast.setConfig(cfg);
+    fast.updateGrip(0.0, GRIP_HELD, ev);
+    fast.addVelocity(STEP, {{6.4, 6.4, 0}, {}});
+    fast.addVelocity(STEP * 2, linearVelocity(9.0));
+    fast.addVelocity(STEP * 3, linearVelocity(3.0));
+    fast.updateGrip(STEP * 3, GRIP_OPEN, ev);
+    fast.override(STEP * 3, out);
+    double fastAngle = std::atan2(out.linear.y, out.linear.x) * 180.0 / 3.14159265358979323846;
+    constexpr double FAST_MAX_MIX_DEG = 5.0;  // 9 m/s: 45° 앞 샘플이 거의 안 섞임
+    check(std::fabs(fastAngle) < FAST_MAX_MIX_DEG, "release dir window: fast throw mostly own direction", fastAngle, 0);
+    // 3 m/s: 구간 30 ms → 앞 샘플도 평균에 들어간다
+    ReleaseBoost slow;
+    slow.setConfig(cfg);
+    slow.updateGrip(0.0, GRIP_HELD, ev);
+    slow.addVelocity(STEP, {{2.1, 2.1, 0}, {}});
+    slow.addVelocity(STEP * 2, linearVelocity(3.0));
+    slow.addVelocity(STEP * 3, linearVelocity(1.0));
+    slow.updateGrip(STEP * 3, GRIP_OPEN, ev);
+    slow.override(STEP * 3, out);
+    double slowAngle = std::atan2(out.linear.y, out.linear.x) * 180.0 / 3.14159265358979323846;
+    check(slowAngle > 2 * FAST_MAX_MIX_DEG, "release dir window: slow throw averages neighbors", slowAngle, 0);
+}
+
+
+// 한 프레임에 여러 예측 시각으로 조회 (시간이 뒤섞임) 해도 시간순 기록으로 판단한다
+void testReleaseIgnoresOutOfOrderSamples() {
+    constexpr double FRAME = 0.011;
+    constexpr double AHEAD = 0.030;  // 미래 예측 조회
+    ReleaseBoost boost;
+    ReleaseBoostConfig cfg;
+    boost.setConfig(cfg);
+    ReleaseEvent ev;
+    boost.updateGrip(0.0, GRIP_HELD, ev);
+    // 손 속도: 앞선 시각 조회와 현재 시각 조회는 같은 움직임 (현재 시각 쪽은 그만큼 과거 값)
+    const double speeds[] = {2.0, 5.0, 8.0, 8.0, 7.5, 7.0, 4.0, 2.0, 1.0, 1.0, 1.0};
+    constexpr int AHEAD_FRAMES = 3;  // 33 ms
+    double t = 0;
+    for (int i = 0; i < static_cast<int>(std::size(speeds)); ++i) {
+        t += FRAME;
+        boost.addVelocity(t + AHEAD_FRAMES * FRAME, linearVelocity(speeds[i]));
+        int past = i - AHEAD_FRAMES;
+        boost.addVelocity(t, linearVelocity(past >= 0 ? speeds[past] : speeds[0]));  // 뒤로 감
+    }
+    bool fired = boost.updateGrip(t + AHEAD_FRAMES * FRAME, GRIP_OPEN, ev);
+    check(fired && ev.peakAgeSec <= cfg.maxPeakAgeSec, "release: out-of-order samples ignored", ev.peakAgeSec, cfg.maxPeakAgeSec);
 }
 
 void testReleaseMaxRatio() {
@@ -495,6 +598,70 @@ void testVdFrameFit() {
     check(normal.verdict() == VdFrameFit::Verdict::Normal, "frame fit: normal -> no fix", normal.fitErrorDeg(), normal.rawErrorDeg());
 }
 
+
+// 세션 틀어짐(X 15° + Y 6°)을 손 움직임만으로 찾는지. VD 처럼 틀린 속도로 포즈를 뒤로 외삽한 입력.
+Quat eulerXY(double xDeg, double yDeg) {
+    constexpr double D = 3.14159265358979323846 / 180.0;
+    Quat qx{std::cos(xDeg * D / 2), std::sin(xDeg * D / 2), 0, 0};
+    Quat qy{std::cos(yDeg * D / 2), 0, std::sin(yDeg * D / 2), 0};
+    return multiply(qx, qy);
+}
+
+void testVdFrameCalibrator() {
+    constexpr double DT = 0.0154;            // VD 공유 메모리 주기
+    constexpr double LAG = 0.037;            // poseLagMs
+    constexpr int STEPS = 400;               // 약 6초
+    constexpr double TOLERANCE_DEG = 1.0;
+    const Quat trueFrame = eulerXY(15.0, -6.0);  // B: local = B · reported
+    VdFrameCalibrator cal;
+    cal.setPrior(vdPitchFrame(VdFrameFixConfig::DEFAULT_PITCH_DEG));
+    cal.setUndoLag(LAG);
+    check(!cal.calibrated(), "calibrator: default before motion", 0, 0);
+    auto expq = [](const Vec3& rv) {
+        double n = std::sqrt(rv.x * rv.x + rv.y * rv.y + rv.z * rv.z);
+        if (n < 1e-12) return Quat{};
+        double s = std::sin(n / 2) / n;
+        return Quat{std::cos(n / 2), rv.x * s, rv.y * s, rv.z * s};
+    };
+    auto logq = [](Quat q) {
+        if (q.w < 0) q = {-q.w, -q.x, -q.y, -q.z};
+        double s = std::sqrt(q.x * q.x + q.y * q.y + q.z * q.z);
+        if (s < 1e-12) return Vec3{};
+        double k = 2 * std::atan2(s, q.w) / s;
+        return Vec3{q.x * k, q.y * k, q.z * k};
+    };
+    // 팔을 흔들고 손목을 돌리는 움직임 (회전축과 이동 방향이 계속 바뀜)
+    auto rotAt = [&](double t) { return expq({0.9 * std::sin(2.1 * t), 1.3 * std::sin(1.3 * t + 1), 0.6 * std::sin(3.1 * t)}); };
+    auto posAt = [](double t) { return Vec3{0.4 * std::sin(1.7 * t), 0.3 * std::sin(2.3 * t), 0.35 * std::cos(1.1 * t)}; };
+    constexpr double H = 1e-4;
+    Vec3 prevV, prevW;  // 보고 값은 한 프레임 늦다
+    for (int i = 0; i < STEPS; ++i) {
+        double t = i * DT;
+        Quat r = rotAt(t);
+        Vec3 w = logq(multiply(rotAt(t + H), conjugate(rotAt(t - H))));
+        w = {w.x / (2 * H), w.y / (2 * H), w.z / (2 * H)};
+        Vec3 p0 = posAt(t - H), p1 = posAt(t + H), p = posAt(t);
+        Vec3 v{(p1.x - p0.x) / (2 * H), (p1.y - p0.y) / (2 * H), (p1.z - p0.z) / (2 * H)};
+        // 보고 값: reported = Bᵀ · Rᵀ · true (world 라벨 = R · reported)
+        Quat toRep = conjugate(trueFrame);
+        Vec3 vNow = rotate(toRep, rotate(conjugate(r), v));
+        Vec3 wNow = rotate(toRep, rotate(conjugate(r), w));
+        Vec3 vRep = i == 0 ? vNow : prevV, wRepLocal = i == 0 ? wNow : prevW;
+        prevV = vNow;
+        prevW = wNow;
+        Vec3 wRepWorld = wRepLocal;  // VD 는 로컬 값을 world 라벨로 보낸다
+        // VD 외삽: p - lag·v_rep, exp(-lag·ω_rep)·R
+        Vec3 pd{p.x - LAG * vRep.x, p.y - LAG * vRep.y, p.z - LAG * vRep.z};
+        Quat rd = multiply(expq({-LAG * wRepWorld.x, -LAG * wRepWorld.y, -LAG * wRepWorld.z}), r);
+        cal.addSample(0, t, rd, pd, vRep, wRepWorld);
+    }
+    Quat f = cal.frame(), d = multiply(f, conjugate(trueFrame));
+    double errDeg = 2 * std::acos(std::fmin(1.0, std::fabs(d.w))) * 180.0 / 3.14159265358979323846;
+    check(cal.calibrated() && errDeg < TOLERANCE_DEG, "calibrator: finds X15/Y6 session frame", errDeg, 0);
+    cal.reset();
+    check(!cal.calibrated(), "calibrator: reset -> default", 0, 0);
+}
+
 }  // namespace
 
 int main() {
@@ -502,6 +669,7 @@ int main() {
     testVdFrameDetector();
     testVdFrameDetectorSticky();
     testVdFrameFit();
+    testVdFrameCalibrator();
     testStickAndHaptic();
     testPoseLag();
     testPoseLead();
@@ -509,6 +677,9 @@ int main() {
     testSpikeGuard();
     testReleaseDirectionAveraged();
     testReleaseMaxRatio();
+    testReleaseUsesLastFastMoment();
+    testReleaseIgnoresOutOfOrderSamples();
+    testReleaseDirectionWindowShrinksWhenFast();
     testDpad();
     testDpadGesture();
     testSettingsParse();

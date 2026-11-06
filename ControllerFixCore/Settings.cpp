@@ -17,9 +17,14 @@ const char* DEFAULT_INI =
     "; Galaxy XR 던지기 보정. auto = 필요한 기기인지 자동 판별해서 그때만 적용 (권장)\n"
     ";   1 = 항상 적용, 0 = 끄고 아래 추정/블렌딩 방식 사용\n"
     "vdFrameFix=auto\n"
-    "vdFramePitchDeg=13\n"
+    "; 기본 틀어짐 각도 (자동 보정 전, 또는 자동 보정을 끈 경우)\n"
+    "vdFramePitchDeg=15\n"
     "; 각속도 전용 pitch\n"
-    "vdAngularPitchDeg=13\n"
+    "vdAngularPitchDeg=15\n"
+    "; 1 = 손 움직임으로 세션마다 틀어짐을 자동으로 맞춤 (권장), 0 = 위 고정 각도만 사용\n"
+    "vdAutoCalibrate=1\n"
+    "; 1 = 속도 변환에 VD 외삽 전 손 회전을 사용 (권장), 0 = 이전 방식\n"
+    "vdFrameUndoLag=1\n"
     "; 진단: 컨트롤러 원본 데이터를 captures 폴더에 CSV로 기록\n"
     "vdDump=0\n"
     "; 회귀에 쓰는 과거 구간 (ms)\n"
@@ -52,16 +57,25 @@ const char* DEFAULT_INI =
     "blendLinearHigh=1.5\n"
     "blendAngularLow=2.0\n"
     "blendAngularHigh=6.0\n"
-    "; 그립 해제 순간 보정: 놓기 직전 releasePeakMs 동안의 최고 속도를 releaseHoldMs 동안 내보냄\n"
-    "; (최고 속도보다 늦게 놓아서 뚝 떨어지는 문제용. 너무 세면 0, 아직 힘이 빠지면 peak/hold 를 늘림)\n"
+    "; 그립 해제 순간 보정: 그립 판정이 늦으면, 놓기 직전 손이 아직 빨랐던 마지막 순간의 속도를\n"
+    "; releaseHoldMs 동안 내보냄 (세기와 방향 모두 그 순간).\n"
     "releaseBoost=1\n"
     "releasePeakMs=150\n"
     "releaseHoldMs=60\n"
-    "; 최고 속도가 놓기보다 이 시간(ms) 이상 앞서면 보정 안 함 (멈췄다가 내려놓을 때 튀어 나가지 않게)\n"
+    "; '아직 빨랐던' 기준: 최고 속도의 이 비율 이상\n"
+    "releaseFastRatio=0.85\n"
+    "; 놓는 순간보다 이 시간(ms) 앞의 속도를 기준으로 사용 (빠르게 던질 때 아래로 꺾이는 것 방지, 0 = 놓는 순간)\n"
+    "; SteamVR 게임용\n"
+    "releaseLookbackMs=20\n"
+    "; VDXR 게임용 (일찍 놓을 때 방향이 틀어져 0 이 기본)\n"
+    "openxrReleaseLookbackMs=0\n"
+    "; 그 순간이 놓기보다 이 시간(ms) 이상 앞서면 보정 안 함 (멈췄다가 내려놓을 때 튀어 나가지 않게)\n"
     "releaseMaxPeakAgeMs=80\n"
     "releaseMinSpeed=1.0\n"
-    "; 최고 속도 앞뒤 이 시간(ms)의 평균 방향을 사용 (던지는 방향 안정화, 0 = 끔)\n"
-    "releaseDirWindowMs=65\n"
+    "; 그 순간 앞뒤 이 시간(ms)의 평균 방향을 사용 (한 프레임 방향 튐 방지, 0 = 끔). 최대값\n"
+    "releaseDirWindowMs=30\n"
+    "; 빠를수록 구간을 줄임: 구간 동안 곡선이 이 각도만 돌도록 (4 m/s 30 ms, 8 m/s 16 ms). 0 = 고정\n"
+    "releaseDirArcDeg=6\n"
     "; 보정 속도 상한: 놓는 순간 속도의 배수 (0 = 제한 없음)\n"
     "releaseMaxRatio=0\n"
     "; 물건을 잡는 버튼: grip | trigger\n"
@@ -170,7 +184,13 @@ void SettingsFile::parse(std::istream& in, Settings& s) {
             else if (key == "vdFramePitchDeg") s.vdFix.pitchDeg = std::stod(val);
             else if (key == "gripRelease") s.releaseBoost.gripRelease = std::stod(val);
             else if (key == "vdAngularPitchDeg") s.vdFix.angularPitchDeg = std::stod(val);
+            else if (key == "vdAutoCalibrate") s.vdFix.autoCalibrate = std::stoi(val) != 0;
+            else if (key == "vdFrameUndoLag") s.vdFix.undoLagFrame = std::stoi(val) != 0;
             else if (key == "releaseDirWindowMs") s.releaseBoost.directionWindowSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "releaseFastRatio") s.releaseBoost.fastRatio = std::stod(val);
+            else if (key == "releaseLookbackMs") s.releaseBoost.minLookbackSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "openxrReleaseLookbackMs") s.openxrReleaseLookbackSec = std::stod(val) / MS_PER_SEC;
+            else if (key == "releaseDirArcDeg") s.releaseBoost.directionArcDeg = std::stod(val);
             else if (key == "releaseMaxRatio") s.releaseBoost.maxRatio = std::stod(val);
             else if (key == "releaseButton") s.releaseBoost.button = val == "trigger" ? ReleaseButton::Trigger : ReleaseButton::Grip;
             else if (key == "dpadEmulation") s.dpad.enabled = std::stoi(val) != 0;

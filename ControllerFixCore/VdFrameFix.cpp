@@ -16,10 +16,15 @@ Quat rotationAboutX(double angleRad) { return {std::cos(angleRad * HALF), std::s
 
 }  // namespace
 
+Quat vdPitchFrame(double pitchDeg) { return rotationAboutX(pitchDeg * DEG_TO_RAD); }
+
+Vec3 vdLocalToWorld(const Quat& poseRotation, const Vec3& reported, const Quat& frame) {
+    return rotate(poseRotation, rotate(frame, reported));
+}
+
 Vec3 vdLocalToWorld(const Quat& poseRotation, const Vec3& reported, double pitchDeg) {
     // Qᵀ = X축 +pitch 회전
-    Vec3 local = rotate(rotationAboutX(pitchDeg * DEG_TO_RAD), reported);
-    return rotate(poseRotation, local);
+    return vdLocalToWorld(poseRotation, reported, vdPitchFrame(pitchDeg));
 }
 
 namespace {

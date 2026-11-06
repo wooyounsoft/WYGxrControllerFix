@@ -18,6 +18,8 @@ constexpr const char* SETTINGS_FILE = "settings.ini";
 constexpr const char* CAPTURE_DIR = "captures";
 constexpr double NANOSECONDS_PER_SECOND = 1e9;
 constexpr double MS_PER_SEC = 1000.0;
+constexpr double RAD_TO_DEG = 57.29577951308232;
+constexpr double RELEASE_LOG_MIN_SPEED = 3.0;  // m/s, 이보다 빠른 해제는 보정 여부와 무관하게 기록
 constexpr size_t NAME_BUFFER_SIZE = 64;
 constexpr XrSpaceLocationFlags POSE_VALID = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
 constexpr XrSpaceVelocityFlags VELOCITY_VALID = XR_SPACE_VELOCITY_LINEAR_VALID_BIT | XR_SPACE_VELOCITY_ANGULAR_VALID_BIT;
@@ -257,6 +259,7 @@ void SpaceVelocityFixer::tuneHaptic(XrHapticVibration& vibration) {
 void SpaceVelocityFixer::onSpaceDestroyed(XrSpace space) {
     std::lock_guard lock(m_mutex);
     m_actionSpaces.erase(space);
+    m_calibrations.erase(space);
     for (auto it = m_pairs.begin(); it != m_pairs.end();)
         it = (it->first.first == space || it->first.second == space) ? m_pairs.erase(it) : std::next(it);
     for (auto it = m_lastCaptureTime.begin(); it != m_lastCaptureTime.end();)
@@ -291,23 +294,40 @@ void SpaceVelocityFixer::onActionState(XrAction action, Hand hand, double value)
         if (spaceHand(pair.first) != resolved) continue;
         controllerfix::ReleaseEvent ev;
         // 해제 시각은 이 공간의 최신 포즈 시각 기준 (앱은 예측 시각으로 포즈를 조회한다)
-        if (ps.releaseBoost.updateGrip(ps.lastSampleSec, value, ev)) {
+        bool fired = ps.releaseBoost.updateGrip(ps.lastSampleSec, value, ev);
+        if (fired) {
             ++m_boostCount;
             LayerLog("%s hand release boost: %.2f m/s -> %.2f m/s (peak %.0f ms before release)", handName(resolved),
                      ev.currentSpeed, ev.peakSpeed, ev.peakAgeSec * MS_PER_SEC);
         }
+        // 진단: 빠른 동작인데 보정이 안 된 해제, 그리고 시간이 뒤로 간 조회 수
+        if (ev.result != controllerfix::ReleaseEvent::Result::None && (fired || ev.maxSpeed >= RELEASE_LOG_MIN_SPEED))
+            LayerLog("%s hand release (space %p): %s, current %.2f, used %.2f m/s %.0f ms before, max %.2f m/s %.0f ms before, "
+                     "%zu samples, %zu out-of-order", handName(resolved), static_cast<void*>(pair.first),
+                     controllerfix::releaseResultName(ev.result), ev.currentSpeed, ev.peakSpeed, ev.peakAgeSec * MS_PER_SEC,
+                     ev.maxSpeed, ev.maxAgeSec * MS_PER_SEC, ev.samples, ev.outOfOrder);
     }
+}
+
+controllerfix::ReleaseBoostConfig SpaceVelocityFixer::openxrReleaseConfig() const {
+    controllerfix::ReleaseBoostConfig cfg = m_settings.releaseBoost;
+    cfg.minLookbackSec = m_settings.openxrReleaseLookbackSec;
+    return cfg;
 }
 
 void SpaceVelocityFixer::applySettings() {
     for (auto& [pair, ps] : m_pairs) {
-        ps.releaseBoost.setConfig(m_settings.releaseBoost);
+        ps.releaseBoost.setConfig(openxrReleaseConfig());
         ps.fit.setPriorPitch(m_settings.vdFix.pitchDeg);
     }
+    for (auto& [space, sc] : m_calibrations) sc.calibrator.setPrior(controllerfix::vdPitchFrame(m_settings.vdFix.pitchDeg));
 }
 
 void SpaceVelocityFixer::pollHeadset() {
-    if (m_headset.poll()) LayerLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+    if (!m_headset.poll()) return;
+    LayerLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+    m_calibrations.clear();  // 기기가 바뀌면 틀어짐도 달라진다 → 처음부터 다시 맞춤
+    for (auto& [pair, ps] : m_pairs) ps.calibratorDevice = -1;
 }
 
 bool SpaceVelocityFixer::throwFixOff() const {
@@ -333,6 +353,36 @@ void SpaceVelocityFixer::logStats() {
     m_nextStatsLog = now + STATS_LOG_INTERVAL;
     LayerLog("stats: actionSpaces=%zu locates=%llu velocityRequested=%llu replaced=%llu boosts=%llu haptics=%llu",
              m_actionSpaces.size(), m_locateCount, m_velocityRequestCount, m_replacedCount, m_boostCount, m_hapticCount);
+    for (const auto& [space, sc] : m_calibrations)
+        if (sc.calibrator.pairCount() > 0) logCalibration(space, sc, "status");
+}
+
+void SpaceVelocityFixer::logCalibration(XrSpace space, const SpaceCalibration& sc, const char* reason) const {
+    const controllerfix::VdFrameCalibrator& c = sc.calibrator;
+    const controllerfix::Quat& b = c.frame();
+    double s = std::sqrt(b.x * b.x + b.y * b.y + b.z * b.z);
+    double angle = 2 * std::atan2(s, std::fabs(b.w)) * RAD_TO_DEG;
+    double k = s > 0 ? (b.w < 0 ? -1.0 : 1.0) * angle / s : 0;  // 회전 벡터 (deg)
+    LayerLog("%s hand space %p vdAutoCalibrate %s: %s (%s), frame %.1f deg (x %.1f, y %.1f, z %.1f), fit error %.1f deg, pairs %zu",
+             handName(spaceHand(space)), static_cast<void*>(space), reason, c.calibrated() ? "calibrated" : "default",
+             c.angularReliable() ? "linear+angular" : "linear only", angle, b.x * k, b.y * k, b.z * k, c.fitErrorDeg(),
+             c.pairCount());
+}
+
+const controllerfix::Quat* SpaceVelocityFixer::calibrate(XrSpace space, PairState& ps, const controllerfix::PoseSample& sample,
+                                                         const controllerfix::VelocityEstimate& reported) {
+    auto [it, inserted] = m_calibrations.try_emplace(space);
+    SpaceCalibration& sc = it->second;
+    if (inserted) sc.calibrator.setPrior(controllerfix::vdPitchFrame(m_settings.vdFix.pitchDeg));  // VDXR 는 뒤로 외삽 없음 (undo 0)
+    if (ps.calibratorDevice < 0) ps.calibratorDevice = sc.nextDevice++;
+    // 각속도는 R · ω 가 보고 원래 값 (SteamVR 드라이버와 같은 형태)
+    sc.calibrator.addSample(ps.calibratorDevice, sample.timeSec, sample.rotation, sample.position, reported.linear,
+                            controllerfix::rotate(sample.rotation, reported.angular));
+    if (sc.calibrator.calibrated() != sc.loggedCalibrated) {
+        sc.loggedCalibrated = sc.calibrator.calibrated();
+        logCalibration(space, sc, sc.loggedCalibrated ? "first" : "reset");
+    }
+    return sc.calibrator.calibrated() ? &sc.calibrator.frame() : nullptr;
 }
 
 void SpaceVelocityFixer::logVerdict(XrSpace space, PairState& ps) {
@@ -415,6 +465,8 @@ bool SpaceVelocityFixer::fixVelocities(PairState& ps, XrSpace space, const contr
         return true;
     }
     if (!runtimeLinearValid) return false;
+    const controllerfix::Quat* frame =
+        m_settings.vdFix.autoCalibrate && runtimeAngularValid ? calibrate(space, ps, sample, out) : nullptr;
     if (m_settings.vdFix.mode == controllerfix::VdFixMode::Auto) {
         controllerfix::VelocityEstimate measured;
         if (ps.estimator.estimate(measured)) ps.fit.addSample(sample.timeSec, sample.rotation, measured.linear, out.linear);
@@ -422,11 +474,17 @@ bool SpaceVelocityFixer::fixVelocities(PairState& ps, XrSpace space, const contr
         // 판정 전에는 기본 공식으로 적용한다 (설치 대상이 GXR 사용자). 필요 없는 기기로 판정되면 원래 값.
         if (ps.fit.verdict() == controllerfix::VdFrameFit::Verdict::Normal) return false;
     }
-    out.linear = scaled(fixVelocity(ps, sample.rotation, out.linear), m_settings.estimator.linearScale);
+    auto toWorld = [&](const controllerfix::Vec3& v) {
+        return frame ? controllerfix::vdLocalToWorld(sample.rotation, v, *frame) : fixVelocity(ps, sample.rotation, v);
+    };
+    out.linear = scaled(toWorld(out.linear), m_settings.estimator.linearScale);
     // 각속도는 한 번 더 로컬 기준으로 들어온다: ω = R · B · R · ω_reported (SteamVR 드라이버 각속도와 같은 형태)
-    if (runtimeAngularValid)
-        out.angular = scaled(fixVelocity(ps, sample.rotation, controllerfix::rotate(sample.rotation, out.angular)),
+    if (runtimeAngularValid) {
+        controllerfix::Vec3 w = controllerfix::rotate(sample.rotation, out.angular);
+        bool useFrame = frame && m_calibrations[space].calibrator.angularReliable();
+        out.angular = scaled(useFrame ? controllerfix::vdLocalToWorld(sample.rotation, w, *frame) : fixVelocity(ps, sample.rotation, w),
                              m_settings.estimator.angularScale);
+    }
     fixActive = true;
     return true;
 }
@@ -445,7 +503,7 @@ void SpaceVelocityFixer::process(InstanceDispatch& dispatch, XrSpace space, XrSp
     auto [pairIt, inserted] = m_pairs.try_emplace({space, baseSpace});
     PairState& ps = pairIt->second;
     if (inserted) {
-        ps.releaseBoost.setConfig(m_settings.releaseBoost);
+        ps.releaseBoost.setConfig(openxrReleaseConfig());
         ps.fit.setPriorPitch(m_settings.vdFix.pitchDeg);
     }
     controllerfix::EstimatorConfig cfg = m_settings.estimator;

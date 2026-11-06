@@ -36,4 +36,6 @@ add_subdirectory(OpenVRDriver)
 
 add_executable(EstimatorTest tests/EstimatorTest.cpp)
 target_link_libraries(EstimatorTest PRIVATE ControllerFixCore)
+add_executable(CalibratorReplay tests/CalibratorReplay.cpp)
+target_link_libraries(CalibratorReplay PRIVATE ControllerFixCore)
 add_subdirectory(OpenXRLayer)

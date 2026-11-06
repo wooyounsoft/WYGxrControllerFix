@@ -107,7 +107,10 @@ void PoseFixer::initSettings() {
 }
 
 void PoseFixer::pollHeadset() {
-    if (m_headset.poll()) DriverLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+    if (!m_headset.poll()) return;
+    DriverLog("VD headset '%s' -> %s", m_headset.name().c_str(), m_headset.fixLabel());
+    m_calibrator.reset();  // 기기가 바뀌면 틀어짐도 달라진다 → 처음부터 다시 맞춤
+    m_loggedCalibration = 0;
 }
 
 bool PoseFixer::throwFixOff() const {
@@ -137,8 +140,11 @@ void PoseFixer::applySettings() {
               m_settings.blend.linearLow, m_settings.blend.linearHigh, m_settings.blend.angularLow,
               m_settings.blend.angularHigh);
     VdShmDump::setEnabled(m_settings.vdDump);
-    DriverLog("vdFrameFix=%s pitch %.1f deg angular %.1f deg", vdFixModeName(m_settings.vdFix.mode), m_settings.vdFix.pitchDeg,
-              m_settings.vdFix.angularPitchDeg);
+    m_calibrator.setPrior(controllerfix::vdPitchFrame(m_settings.vdFix.pitchDeg));
+    m_calibrator.setUndoLag(m_settings.poseLagSec);
+    DriverLog("vdFrameFix=%s pitch %.1f deg angular %.1f deg autoCalibrate=%d undoLagFrame=%d", vdFixModeName(m_settings.vdFix.mode),
+              m_settings.vdFix.pitchDeg, m_settings.vdFix.angularPitchDeg, m_settings.vdFix.autoCalibrate,
+              m_settings.vdFix.undoLagFrame);
     DriverLog("releaseBoost=%d peak %.0f ms hold %.0f ms maxPeakAge %.0f ms minSpeed %.2f grip %.2f/%.2f dirWindow %.0f ms maxRatio %.1f button=%s",
               m_settings.releaseBoost.enabled, m_settings.releaseBoost.peakWindowSec * MS_PER_SEC,
               m_settings.releaseBoost.holdSec * MS_PER_SEC, m_settings.releaseBoost.maxPeakAgeSec * MS_PER_SEC,
@@ -174,7 +180,44 @@ void PoseFixer::tick() {
                           m_devices[i].boostCount, m_devices[i].spikeCount);
         }
         if (m_hapticCount) DriverLog("haptic events tuned: %llu", m_hapticCount);
+        if (m_settings.vdFix.autoCalibrate && m_calibrator.pairCount() > 0) logCalibration("status");
     }
+}
+
+void PoseFixer::logCalibration(const char* reason) {
+    const controllerfix::Quat& b = m_calibrator.frame();
+    double s = std::sqrt(b.x * b.x + b.y * b.y + b.z * b.z);
+    double angle = QUAT_ANGLE_FACTOR * std::atan2(s, std::fabs(b.w)) * RAD_TO_DEG;
+    double sign = b.w < 0 ? -1.0 : 1.0;
+    double k = s > 0 ? sign * angle / s : 0;  // 회전 벡터 (deg) = 축 · 각도
+    DriverLog("vdAutoCalibrate %s: %s, frame %.1f deg (x %.1f, y %.1f, z %.1f), fit error %.1f deg, pairs %zu, solves %llu", reason,
+              m_calibrator.calibrated() ? "calibrated" : "default", angle, b.x * k, b.y * k, b.z * k, m_calibrator.fitErrorDeg(),
+              m_calibrator.pairCount(), m_calibrator.solveCount());
+}
+
+void PoseFixer::feedCalibrator(uint32_t deviceIndex, const vr::DriverPose_t& original) {
+    if (!m_settings.vdFix.autoCalibrate) return;
+    controllerfix::Quat rotation = toQuat(original.qRotation);
+    m_calibrator.addSample(static_cast<int>(deviceIndex), nowSec() + original.poseTimeOffset, rotation, toVec3(original.vecPosition),
+                           toVec3(original.vecVelocity), controllerfix::rotate(rotation, toVec3(original.vecAngularVelocity)));
+    // 처음 맞춰졌을 때, 그 뒤로는 크게 다시 맞출 때만 바로 기록 (나머지는 30초 통계)
+    if (m_calibrator.calibrated() && m_loggedCalibration == 0) {
+        m_loggedCalibration = m_calibrator.solveCount();
+        logCalibration("first");
+    } else if (!m_calibrator.calibrated() && m_loggedCalibration != 0) {
+        m_loggedCalibration = 0;
+        logCalibration("reset");
+    }
+}
+
+controllerfix::Quat PoseFixer::linearFrame() const {
+    if (m_settings.vdFix.autoCalibrate && m_calibrator.calibrated()) return m_calibrator.frame();
+    return controllerfix::vdPitchFrame(m_settings.vdFix.pitchDeg);
+}
+
+controllerfix::Quat PoseFixer::angularFrame() const {
+    if (m_settings.vdFix.autoCalibrate && m_calibrator.calibrated()) return m_calibrator.frame();
+    return controllerfix::vdPitchFrame(m_settings.vdFix.angularPitchDeg);
 }
 
 PoseFixer::DeviceKind PoseFixer::classify(uint32_t deviceIndex) const {
@@ -245,6 +288,7 @@ void PoseFixer::process(uint32_t deviceIndex, vr::DriverPose_t& pose) {
         applyEstimator(dev, sample.timeSec, pose);
     } else {
         logFrameInfo(dev, deviceIndex, pose);
+        feedCalibrator(deviceIndex, original);
         // Auto 에서 보정이 필요 없는 기기 (Quest 등)로 판정되면 속도/위치는 원래 값 그대로
         if (m_settings.vdFix.mode == controllerfix::VdFixMode::On || useVdFrameFix(dev, deviceIndex, original)) {
             applyVdPoseFix(pose);
@@ -446,7 +490,7 @@ bool PoseFixer::useVdFrameFix(DeviceState& dev, uint32_t deviceIndex, const vr::
     controllerfix::VelocityEstimate measured;
     if (dev.estimator.estimate(measured)) {
         controllerfix::Vec3 raw = toVec3(original.vecVelocity);
-        dev.detector.addVote(measured.linear, raw, controllerfix::vdLocalToWorld(toQuat(original.qRotation), raw, m_settings.vdFix.pitchDeg));
+        dev.detector.addVote(measured.linear, raw, controllerfix::vdLocalToWorld(toQuat(original.qRotation), raw, linearFrame()));
     }
     controllerfix::VdFrameDetector::Verdict verdict = dev.detector.verdict();
     if (verdict != dev.loggedVerdict) {
@@ -472,8 +516,9 @@ void PoseFixer::applyVdPoseFix(vr::DriverPose_t& pose) const {
     controllerfix::VdPose reported{toVec3(pose.vecPosition), toQuat(pose.qRotation), toVec3(pose.vecVelocity),
                                    toVec3(pose.vecAngularVelocity), toVec3(pose.vecAcceleration)};
     controllerfix::VdPoseConfig config;
-    config.pitchDeg = m_settings.vdFix.pitchDeg;
-    config.angularPitchDeg = m_settings.vdFix.angularPitchDeg;
+    config.linearFrame = linearFrame();
+    config.angularFrame = angularFrame();
+    config.frameUndoLagSec = m_settings.vdFix.undoLagFrame ? m_settings.poseLagSec : 0;
     config.poseLagSec = m_settings.poseLagFix ? m_settings.poseLagSec : 0;
     config.poseLeadSec = m_settings.poseLeadSec;
     // linearScale / angularScale: 게임별 세기 조절 (가속도도 같은 배율이라야 SteamVR 외삽이 맞음)

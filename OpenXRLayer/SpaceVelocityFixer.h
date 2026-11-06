@@ -12,6 +12,7 @@
 #include "Dispatch.h"
 #include "ReleaseBoost.h"
 #include "Settings.h"
+#include "VdFrameCalibrator.h"
 #include "VdFrameFit.h"
 #include "VdHeadset.h"
 #include "VelocityEstimator.h"
@@ -76,11 +77,20 @@ private:
         XrVector3f lastLinear{};   // 튐 구간에 대신 내보낼 마지막 보정 결과
         XrVector3f lastAngular{};
         bool hasLastOutput = false;
+        int calibratorDevice = -1;  // 같은 공간의 다른 기준 공간 조회를 구분 (보정기 기록용)
+    };
+
+    // 세션별 속도 프레임 자동 보정. 그립/조준 위치는 B 가 달라서 공간마다 따로 맞춘다.
+    struct SpaceCalibration {
+        controllerfix::VdFrameCalibrator calibrator;
+        int nextDevice = 0;
+        bool loggedCalibrated = false;
     };
 
     SpaceVelocityFixer();
     void pollSettings();
     void applySettings();
+    controllerfix::ReleaseBoostConfig openxrReleaseConfig() const;  // VDXR 전용 앞당김 적용
     void pollHeadset();
     bool throwFixOff() const;  // D-pad 만 동작
     void logStats();
@@ -93,6 +103,10 @@ private:
     void updateDpadGesture(InstanceDispatch& dispatch, XrSpace space, XrSpace baseSpace, XrTime time, const controllerfix::Vec3& hand);
     Hand spaceHand(XrSpace space) const;
     void logVerdict(XrSpace space, PairState& ps);
+    // 자동 보정에 샘플을 넣고, 맞춰졌으면 그 프레임을 돌려준다 (아니면 nullptr)
+    const controllerfix::Quat* calibrate(XrSpace space, PairState& ps, const controllerfix::PoseSample& sample,
+                                         const controllerfix::VelocityEstimate& reported);
+    void logCalibration(XrSpace space, const SpaceCalibration& sc, const char* reason) const;
     controllerfix::Vec3 fixVelocity(PairState& ps, const controllerfix::Quat& rotation, const controllerfix::Vec3& reported) const;
     // 속도 보정. 앱에 돌려줄 값을 바꿨으면 true, fixActive = 프레임 보정이 적용됐는지
     bool fixVelocities(PairState& ps, XrSpace space, const controllerfix::PoseSample& sample, XrSpaceVelocityFlags flags,
@@ -114,6 +128,7 @@ private:
     std::map<XrAction, std::set<Hand>> m_actionHands;
     std::map<XrAction, BindingKind> m_actionKinds;
     std::map<SpacePair, PairState> m_pairs;
+    std::map<XrSpace, SpaceCalibration> m_calibrations;
     std::map<SpacePair, XrTime> m_lastCaptureTime;
     std::map<XrSpace, size_t> m_baseSpaceIndex;  // 캡처에서 기준 공간 구분용
     FILE* m_captureFile = nullptr;
